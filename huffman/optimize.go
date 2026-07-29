@@ -252,7 +252,13 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// snapshot rows, 32 tables at a time.
 		if nTail > 0 {
 			bestTails(sc.rows[:nTail*numTables], &sc.acc, sc.tails[:nTail])
-			sc.fillHeads(nTail)
+			// Both fillers memoise on how far they have already run, but the test
+			// has to be out here: they hold loops, so neither can inline, and every
+			// candidate would otherwise pay a call to be told there is nothing to
+			// do. Only a candidate that reached a new boundary has anything to add.
+			if sc.headN < nTail {
+				sc.fillHeads(nTail)
+			}
 		}
 
 		if orig.WindowSwitching {
@@ -337,7 +343,9 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// Three regions: regions 0 and 1 cover everything below a boundary and
 		// neither moves with big_values, so the best pair of them is computed once
 		// per boundary and reused; only the tail has to be recomputed.
-		sc.fillPrefixes(nTail)
+		if sc.prefixN < nTail {
+			sc.fillPrefixes(nTail)
+		}
 		for j := 2; j < nTail; j++ {
 			p := &sc.prefix[j]
 			if !p.ok {

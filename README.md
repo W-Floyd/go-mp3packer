@@ -140,8 +140,9 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | frame list and per-frame output preallocated, encoder invariants hoisted | 15.1 |
 | peeking the bit window inlined into its callers | 14.9 |
 | bits written through an accumulator, decode positions kept in registers | 14.3 |
+| memoised region costs no longer called once per candidate | 13.6 |
 
-The last seven rows were measured in one sitting, in which the row above them came
+The last eight rows were measured in one sitting, in which the row above them came
 out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
 relative to each other rather than to the older figures.
 
@@ -244,6 +245,14 @@ free, having scored 81 — one point over — and that is thirty-odd calls per f
 side info, so the layout-only path dropped another 10% on top of the search's 6%.
 It costs 40 bytes of `Reader`, which is stack-allocated in every hot path, and it
 means a reader has to be built through `NewReader` rather than as a bare literal.
+
+The same accounting applies to a function that does nothing. The head and prefix
+costs are memoised on how far they have already been computed, but that test sat
+inside them, and both hold loops, so neither can inline: every big_values
+candidate paid a real call to be told there was nothing to do, tens of thousands
+of times per file. Moving the test to the call site — only a candidate that
+reached a new band boundary has anything to add — is worth 5% of the repack for
+two lines.
 
 **Not going back to memory.** Measured on real music rather than the eight-second
 file, the coder was the whole cost: `Decode` a third of the profile and `Encode`
