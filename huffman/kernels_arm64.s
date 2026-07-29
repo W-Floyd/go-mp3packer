@@ -159,28 +159,62 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	VORR V22.B16, V6.B16, V6.B16
 	VORR V23.B16, V7.B16, V7.B16
 
-tailsloop:
-	VLD1.P 64(R0), [V8.S4, V9.S4, V10.S4, V11.S4]
-	VLD1.P 64(R0), [V12.S4, V13.S4, V14.S4, V15.S4]
+// ROWMIN reduces one row against the accumulator, leaving the 32 lanes folded
+// down to four in dst. The rows are already scaled: (acc<<5 | lane) - (row<<5)
+// is (acc-row)<<5 | lane, because the shift leaves the low five bits clear.
+#define ROWMIN(dst)                                  \
+	VLD1.P 64(R0), [V8.S4, V9.S4, V10.S4, V11.S4]  \
+	VLD1.P 64(R0), [V12.S4, V13.S4, V14.S4, V15.S4] \
+	VSUB  V8.S4, V0.S4, V8.S4                       \
+	VSUB  V9.S4, V1.S4, V9.S4                       \
+	VSUB  V10.S4, V2.S4, V10.S4                     \
+	VSUB  V11.S4, V3.S4, V11.S4                     \
+	VSUB  V12.S4, V4.S4, V12.S4                     \
+	VSUB  V13.S4, V5.S4, V13.S4                     \
+	VSUB  V14.S4, V6.S4, V14.S4                     \
+	VSUB  V15.S4, V7.S4, V15.S4                     \
+	VUMIN V9.S4, V8.S4, V8.S4                       \
+	VUMIN V11.S4, V10.S4, V10.S4                    \
+	VUMIN V13.S4, V12.S4, V12.S4                    \
+	VUMIN V15.S4, V14.S4, V14.S4                    \
+	VUMIN V10.S4, V8.S4, V8.S4                      \
+	VUMIN V14.S4, V12.S4, V12.S4                    \
+	VUMIN V12.S4, V8.S4, dst
 
-	// The rows are already scaled: (acc<<5 | lane) - (row<<5) is (acc-row)<<5 |
-	// lane, because the shift leaves the low five bits clear.
-	VSUB V8.S4, V0.S4, V8.S4
-	VSUB V9.S4, V1.S4, V9.S4
-	VSUB V10.S4, V2.S4, V10.S4
-	VSUB V11.S4, V3.S4, V11.S4
-	VSUB V12.S4, V4.S4, V12.S4
-	VSUB V13.S4, V5.S4, V13.S4
-	VSUB V14.S4, V6.S4, V14.S4
-	VSUB V15.S4, V7.S4, V15.S4
+	// Four rows at a time. Reducing each row's last four lanes on its own would
+	// cost a serial fold plus a lane-to-register move per row; transposing four
+	// partial results instead turns all four folds into three minimums and lets
+	// the answers leave as one 16-byte store.
+	CMP $4, R3
+	BLT tailsone
 
-	VUMIN V9.S4, V8.S4, V8.S4
-	VUMIN V11.S4, V10.S4, V10.S4
-	VUMIN V13.S4, V12.S4, V12.S4
-	VUMIN V15.S4, V14.S4, V14.S4
-	VUMIN V10.S4, V8.S4, V8.S4
-	VUMIN V14.S4, V12.S4, V12.S4
-	VUMIN V12.S4, V8.S4, V8.S4
+tailsfour:
+	ROWMIN(V24.S4)
+	ROWMIN(V25.S4)
+	ROWMIN(V26.S4)
+	ROWMIN(V27.S4)
+
+	// Transpose the 4x4 of partial minimums, so that lane i of each result
+	// vector belongs to row i, and fold it.
+	VTRN1 V25.S4, V24.S4, V16.S4
+	VTRN2 V25.S4, V24.S4, V17.S4
+	VTRN1 V27.S4, V26.S4, V18.S4
+	VTRN2 V27.S4, V26.S4, V19.S4
+	VUMIN V17.S4, V16.S4, V20.S4
+	VUMIN V19.S4, V18.S4, V21.S4
+	VZIP1 V21.D2, V20.D2, V22.D2
+	VZIP2 V21.D2, V20.D2, V23.D2
+	VUMIN V23.S4, V22.S4, V22.S4
+
+	VST1.P [V22.S4], 16(R2)
+	SUB    $4, R3
+	CMP    $4, R3
+	BGE    tailsfour
+
+	CBZ R3, tailsdone
+
+tailsone:
+	ROWMIN(V8.S4)
 
 	VREV64 V8.S4, V9.S4
 	VUMIN  V9.S4, V8.S4, V8.S4
@@ -191,7 +225,7 @@ tailsloop:
 	MOVW  R5, (R2)
 	ADD   $4, R2
 	SUB   $1, R3
-	CBNZ  R3, tailsloop
+	CBNZ  R3, tailsone
 
 tailsdone:
 	RET

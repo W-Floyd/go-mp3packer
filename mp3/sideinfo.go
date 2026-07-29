@@ -114,7 +114,7 @@ func ParseSideInfo(h Header, raw []byte) SideInfo {
 // h.SideInfoSize() bytes; the standard field layout fills the block exactly, so
 // Serialize(Parse(x)) == x for any well-formed x.
 func (si SideInfo) Serialize(h Header) []byte {
-	w := bitio.NewWriter()
+	w := bitio.NewWriterSize(h.SideInfoSize())
 	w.Write(uint32(si.MainDataBegin), h.mainDataBeginBits())
 	w.Write(si.PrivateBits, h.privateBitCount())
 	if h.Version == MPEG1 {

@@ -106,10 +106,13 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 
 	// The reservoir view of the input: every frame's data slots end to end. A
 	// frame's own audio starts main_data_begin bytes before its own slots, which
-	// may be several frames back.
-	var pool []byte
+	// may be several frames back. It cannot exceed the input it is copied from, so
+	// it is sized once rather than grown. A Frame is over a kilobyte, which is why
+	// this and the loops below index instead of ranging by value.
+	pool := make([]byte, 0, len(data))
 	starts := make([]int, len(file.Frames))
-	for i, fr := range file.Frames {
+	for i := range file.Frames {
+		fr := &file.Frames[i]
 		starts[i] = len(pool)
 		pool = append(pool, fr.MainData...)
 		stats.PayloadBits += fr.MainDataBits()
@@ -118,7 +121,7 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 	// A leading header frame carries metadata rather than audio. Preserving it
 	// byte for byte is both simpler and safer than re-deriving it, and it keeps
 	// whatever gapless-playback information the encoder stored there.
-	first := file.Frames[0]
+	first := &file.Frames[0]
 	firstRaw := data[first.Offset : first.Offset+first.Size()]
 	var tag *mp3.InfoTag
 	if first.MainDataBits() == 0 {
@@ -143,8 +146,8 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 	}
 
 	work := recompressAll(audio, pool, starts, opt, &stats)
-	for _, w := range work {
-		stats.NewPayload += w.newBits
+	for i := range work {
+		stats.NewPayload += work[i].newBits
 	}
 
 	out := make([]byte, 0, len(data))
@@ -172,7 +175,7 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 func recompressAll(frames []mp3.Frame, pool []byte, starts []int, opt Options, stats *Stats) []frameWork {
 	work := make([]frameWork, len(frames))
 	run := func(i int) {
-		work[i] = recompressFrame(frames[i], pool, starts[i], opt)
+		work[i] = recompressFrame(&frames[i], pool, starts[i], opt)
 	}
 	if !opt.Recompress || opt.workers() <= 1 || len(frames) < 2 {
 		for i := range frames {
@@ -196,7 +199,8 @@ func recompressAll(frames []mp3.Frame, pool []byte, starts []int, opt Options, s
 		}
 		wg.Wait()
 	}
-	for i, w := range work {
+	for i := range work {
+		w := &work[i]
 		switch {
 		case w.abandoned:
 			stats.Abandoned++
@@ -212,7 +216,7 @@ func recompressAll(frames []mp3.Frame, pool []byte, starts []int, opt Options, s
 
 // mainData extracts a frame's own audio from the input reservoir, zero-filling
 // any part that lies before the start of the file.
-func mainData(fr mp3.Frame, pool []byte, start int) []byte {
+func mainData(fr *mp3.Frame, pool []byte, start int) []byte {
 	n := fr.MainDataBytes()
 	out := make([]byte, n)
 	from := start - fr.SideInfo.MainDataBegin
@@ -227,7 +231,7 @@ func mainData(fr mp3.Frame, pool []byte, start int) []byte {
 // recompressFrame re-codes one frame's granules. On any difficulty it falls back
 // to copying the frame's data through unchanged, which is always safe: the
 // repack still gains from the new layout.
-func recompressFrame(fr mp3.Frame, pool []byte, start int, opt Options) frameWork {
+func recompressFrame(fr *mp3.Frame, pool []byte, start int, opt Options) frameWork {
 	verbatim := func(abandoned bool) frameWork {
 		return frameWork{
 			data:      mainData(fr, pool, start),
@@ -356,10 +360,10 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 	// How many bytes of reservoir each frame needs to have banked before it,
 	// because its own data is larger than one frame can carry.
 	need := make([]int, n+1)
+	total := 0
 	for i := n - 1; i >= 0; i-- {
-		caps := frames[i].Header.Capacities()
-		biggest := caps[len(caps)-1].DataSize
-		need[i] = max(0, len(work[i].data)+need[i+1]-biggest)
+		need[i] = max(0, len(work[i].data)+need[i+1]-frames[i].Header.MaxDataSize())
+		total += len(work[i].data)
 	}
 	if need[0] > 0 {
 		return nil, fmt.Errorf("%w: first frame is short by %d bytes", ErrReservoirOverflow, need[0])
@@ -374,7 +378,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 	// Place the data first, then emit frames around it. stream is the new
 	// reservoir: frame data end to end, with explicit gaps wherever the
 	// reservoir would otherwise overflow the 9-bit back-reference.
-	var stream []byte
+	stream := make([]byte, 0, total)
 	capacity := 0
 	chosen := make([]mp3.Capacity, n)
 	mdb := make([]int, n)
@@ -386,7 +390,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 			// More reservoir than the side info can point back to: the excess
 			// becomes unused padding inside earlier frames.
 			pad := avail - h.MaxMainDataBegin()
-			stream = append(stream, make([]byte, pad)...)
+			stream = appendZeros(stream, pad)
 			avail = h.MaxMainDataBegin()
 			gaps += pad
 		}
@@ -406,7 +410,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 
 	cursor := 0
 	for i := range frames {
-		fr := frames[i]
+		fr := &frames[i]
 		*framePos = append(*framePos, len(out)-streamStart)
 
 		h := fr.Header
@@ -437,7 +441,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		end := min(cursor+chosen[i].DataSize, len(stream))
 		out = append(out, stream[cursor:end]...)
 		if pad := chosen[i].DataSize - (end - cursor); pad > 0 {
-			out = append(out, make([]byte, pad)...) // tail of the last frames
+			out = appendZeros(out, pad) // tail of the last frames
 		}
 		cursor = end
 	}
@@ -450,13 +454,18 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 // smallestCapacity returns the cheapest frame size holding at least want bytes,
 // or the largest available size if none can.
 func smallestCapacity(h mp3.Header, want int) mp3.Capacity {
-	caps := h.Capacities()
-	for _, c := range caps {
-		if c.DataSize >= want {
-			return c
-		}
+	return h.SmallestCapacity(want)
+}
+
+// appendZeros extends b with n zero bytes, without allocating a throwaway slice
+// to copy them from. Padding runs are short but there is one per frame.
+func appendZeros(b []byte, n int) []byte {
+	var zeros [64]byte
+	for n > len(zeros) {
+		b = append(b, zeros[:]...)
+		n -= len(zeros)
 	}
-	return caps[len(caps)-1]
+	return append(b, zeros[:n]...)
 }
 
 func (s Stats) String() string {

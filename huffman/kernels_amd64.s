@@ -1,8 +1,19 @@
 #include "textflag.h"
 
-// SSE2 only, which is baseline on amd64: the newer packed-minimum and blend
-// instructions would shorten bestTable a little, but not enough to justify a
-// runtime feature check.
+// The accumulation kernel is pure SSE2, which is baseline on amd64. The two
+// reduction kernels have a second version using SSE4.1's packed minimum: SSE2
+// has no 32-bit minimum at all, so each one costs six instructions to emulate,
+// and the reductions are almost nothing but minimums.
+
+// func cpuHasSSE41() bool
+TEXT ·cpuHasSSE41(SB), NOSPLIT, $0-1
+	MOVL $1, AX
+	XORL CX, CX
+	CPUID
+	SHRL $19, CX // ECX bit 19 reports SSE4.1
+	ANDL $1, CX
+	MOVB CX, ret+0(FP)
+	RET
 
 // func accumulate(acc *[32]int32, keys []uint32)
 TEXT ·accumulate(SB), NOSPLIT, $0-32
@@ -137,6 +148,9 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	MOVQ to+8(FP), BX
 	LEAQ ·laneIndex(SB), DI
 
+	CMPB ·hasSSE41(SB), $0
+	JNE  keybest41
+
 	// Both rows arrive scaled by 32, so their difference already has room for the
 	// lane label. Costs are non-negative and bounded well below 2^26, so nothing
 	// reaches the sign bit and a signed comparison orders the keys correctly.
@@ -170,6 +184,39 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	PCMPGTL X1, X3
 	PAND   X3, X2
 	PXOR   X2, X0
+
+	MOVL X0, ret+16(FP)
+	RET
+
+// KEYMIN41 is KEYMIN with the emulated minimum replaced by the real one. Costs
+// never reach the sign bit, so unsigned and signed order the keys alike.
+#define KEYMIN41(off)  \
+	MOVOU off(BX), X1 \
+	MOVOU off(AX), X2 \
+	PSUBL X2, X1      \
+	MOVOU off(DI), X2 \
+	POR   X2, X1      \
+	PMINUD X1, X0
+
+keybest41:
+	MOVOU 0(BX), X0
+	MOVOU 0(AX), X2
+	PSUBL X2, X0
+	MOVOU 0(DI), X2
+	POR   X2, X0
+
+	KEYMIN41(16)
+	KEYMIN41(32)
+	KEYMIN41(48)
+	KEYMIN41(64)
+	KEYMIN41(80)
+	KEYMIN41(96)
+	KEYMIN41(112)
+
+	PSHUFD $0xB1, X0, X1
+	PMINUD X1, X0
+	PSHUFD $0x4E, X0, X1
+	PMINUD X1, X0
 
 	MOVL X0, ret+16(FP)
 	RET
@@ -234,6 +281,9 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	MOVOU 112(BX), X8
 	POR   X8, X7
 
+	CMPB ·hasSSE41(SB), $0
+	JNE  tailsloop41
+
 tailsloop:
 	// The rows are already scaled: (acc<<5 | lane) - (row<<5) is (acc-row)<<5 |
 	// lane, because the shift leaves the low five bits clear.
@@ -273,4 +323,36 @@ tailsloop:
 	JNZ   tailsloop
 
 tailsdone:
+	RET
+
+// TAILMIN41 is TAILMIN with the emulated minimum replaced by the real one.
+#define TAILMIN41(reg, off) \
+	MOVOU off(SI), X9  \
+	MOVOU reg, X10     \
+	PSUBL X9, X10      \
+	PMINUD X10, X8
+
+tailsloop41:
+	MOVOU 0(SI), X9
+	MOVOU X0, X8
+	PSUBL X9, X8
+
+	TAILMIN41(X1, 16)
+	TAILMIN41(X2, 32)
+	TAILMIN41(X3, 48)
+	TAILMIN41(X4, 64)
+	TAILMIN41(X5, 80)
+	TAILMIN41(X6, 96)
+	TAILMIN41(X7, 112)
+
+	PSHUFD $0xB1, X8, X9
+	PMINUD X9, X8
+	PSHUFD $0x4E, X8, X9
+	PMINUD X9, X8
+
+	MOVL  X8, (DI)
+	ADDQ  $4, DI
+	ADDQ  $128, SI
+	DECQ  CX
+	JNZ   tailsloop41
 	RET

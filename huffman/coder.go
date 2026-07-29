@@ -61,7 +61,10 @@ func (c Config) regionPairs(sampleRate int) (r0, r1, r2 int) {
 // A false result means the granule cannot be safely recompressed — most often
 // because the frame references reservoir data that the file does not contain.
 func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int) bool {
-	*dst = Spectrum{}
+	// Every coefficient below pos is written before it is read, so only the tail
+	// above it has to be cleared, and that is done once at the end. Clearing the
+	// whole spectrum up front would rewrite 4.6kB per granule to no purpose: a
+	// dense granule leaves almost nothing above pos.
 	limit := r.Tell() + maxBits
 	pos := 0
 
@@ -75,11 +78,15 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 		lut := &decodeTables[idx]
 		linbits := uint(tables[idx].linbits)
 		end := pos + 2*pairs
+		// Both of these depend only on the table, so they are settled before the
+		// loop rather than re-tested for every pair. Table 0 codes nothing, so it
+		// consumes no bits and cannot overrun the limit.
+		if len(tree) == 0 {
+			return pos >= end || pos >= NumCoefficients-1
+		}
+		checkLimit := idx != 0
 		for pos < end && pos < NumCoefficients-1 {
-			if idx != 0 && r.Tell() >= limit {
-				return false
-			}
-			if len(tree) == 0 {
+			if checkLimit && r.Tell() >= limit {
 				return false
 			}
 			w := r.Peek64()
@@ -181,7 +188,13 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 	if r.Tell() > r.Len() {
 		ok = false // ran off the end of the available reservoir data
 	}
-	return ok
+	if !ok {
+		// dst is only meaningful when the granule decoded, so leave the partial
+		// result rather than pay to tidy it.
+		return false
+	}
+	clear(dst[pos:])
+	return true
 }
 
 // Encode writes a spectrum using cfg. cfg must be able to represent every

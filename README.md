@@ -101,7 +101,7 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are well ahead: 2.5 ms versus 22.4 ms to repack an 8-second VBR file
+On speed we are well ahead: 2.0 ms versus 22.4 ms to repack an 8-second VBR file
 (Apple M4 Max, both multi-threaded; see below).
 
 To reproduce, point the benchmarks at any other implementation that accepts
@@ -132,8 +132,16 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | count1 costs built only over the range searched | 22.6 |
 | winner comparison hoisted, head costs precomputed | 21.3 |
 | prefix rows stored pre-scaled | 20.5 |
+| boundary tests reduced to arithmetic on one counter | 18.3 |
+| dead two-region candidates never entered | 17.7 |
+| count1 deltas tabulated, region covers hoisted out of the bv loop | 17.1 |
+| tail reduction batched four rows at a time (NEON) | 17.0 |
 
-With all cores that file takes 2.5 ms. Every step was verified by comparing
+The last four rows were measured in one sitting, in which the row above them came
+out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
+relative to each other rather than to the older figures.
+
+With all cores that file takes 2.0 ms. Every step was verified by comparing
 output byte for byte against the previous one, so none of this changed a single
 bit of any result.
 
@@ -159,6 +167,26 @@ moves with big_values shares its upper endpoint, so they are now computed
 together: one call per candidate that keeps the shared endpoint in registers and
 walks the rows. That alone took 36 ms to 25.
 
+**Counting instead of searching.** With the kernels that fast, what was left was
+the enumeration around them: for every candidate big_values the search walked the
+band table to find where the regions could fall, four separate times, one of them
+nested. But the band boundaries are sorted, so every one of those questions is the
+same question — how many boundaries lie below big_values — and `boundary[i] >= bv`
+is just `i >= nTail`. Counting that once, and carrying it across candidates since
+big_values only grows, replaces all of it with arithmetic: the innermost search
+for the smallest region1_count that reaches the tail becomes one subtraction. The
+two-region loop went from 630 ms to 40 ms of a 5.2 s profile, and the best
+two-region cover below each boundary, which was being re-checked for every
+candidate after being computed once, is now settled the same way the head costs
+already were.
+
+Repacking allocated more than it needed to. `Capacities` built a 30-element slice
+per frame, twice, once only to read its last element; the side-info writers and the
+reservoir grew from nil; and a `Frame` is over a kilobyte, so several loops were
+copying one per iteration by ranging over values. None of that is on the
+recompression path, but it is most of the layout-only path, which dropped by a
+third, and it cut allocations per repack from 2032 to 676.
+
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
 between the big-values and count1 regions barely changes the total — and it cost
@@ -174,8 +202,8 @@ with portable Go equivalents for every other architecture:
 | | asm | Go | |
 | --- | --- | --- | --- |
 | `accumulate` — add 288 pairs' costs across all 32 tables | 252 ns | 3122 ns | 12.4× |
-| `bestTails` — cheapest table for 22 spans sharing an endpoint | 27 ns | 248 ns | 9.0× |
-| `bestTable` — cheapest of 32 tables for one span | 2.8 ns | 10.1 ns | 3.6× |
+| `bestTails` — cheapest table for 22 spans sharing an endpoint | 24 ns | 247 ns | 10.1× |
+| `bestTable` — cheapest of 32 tables for one span | 2.9 ns | 13.0 ns | 4.4× |
 
 All three are 32 lanes wide with no gathers, which is the whole reason they
 vectorise: a pair's cost for every table is one row of a precomputed table,
@@ -190,9 +218,29 @@ shift per row. `TestKernelsMatchPortable` compares the assembly against the Go
 implementations on randomised input, including rows that make a span
 unrepresentable, so the fallbacks stay honest.
 
-The SSE2 path sticks to the amd64 baseline: `PMINSD` would shorten the reductions,
-but not enough to justify a runtime feature check. It is tested on x86-64 in CI;
-the figures above are arm64.
+`bestTails` reduces four rows at once. Folding a row's last four lanes on its own
+needs a shuffle-and-minimum chain and then a lane-to-register move, all serial and
+all per row; transposing four partial results instead turns four of those folds
+into three minimums and lets the four answers leave as one 16-byte store. On arm64
+that is worth about 17%. It would be shorter still with `UMINV`, a single
+horizontal minimum, but Go's arm64 assembler cannot yet emit one — it is in the
+`simd` package's arm64 generator input, so if that lands these kernels could
+collapse into one Go source instead of two `.s` files.
+
+Both reduction kernels have two amd64 versions, chosen once by `CPUID`. SSE2 has
+no 32-bit minimum at all, so each one costs six instructions to emulate, and these
+kernels are almost nothing but minimums; SSE4.1's `PMINUD` does it in one. That
+earns the feature check twice over — `bestTails` more than halves — and since
+every x86 since 2008 takes the SSE4.1 path, `TestKernelsSSE2Fallback` forces the
+emulated one so it stays covered. Measured on a Xeon E5-2698 v4:
+
+| | SSE2 | SSE4.1 | |
+| --- | --- | --- | --- |
+| `bestTails` | 255 ns | 116 ns | 2.2× |
+| `bestTable` | 16.0 ns | 11.7 ns | 1.4× |
+
+The figures in the first table are arm64. x86-64 is tested in CI, and both amd64
+paths were verified and benchmarked on hardware.
 
 ## The compression ceiling
 

@@ -25,11 +25,21 @@ func NewReader(data []byte) *Reader {
 // first, zero-filled past the end of the data. Only the top 57 bits are
 // guaranteed to be present, which is more than the 47 a single MP3 coefficient
 // pair can occupy.
+// The zero-filled tail case is kept out of line so that the hot path is just the
+// aligned load, which the compiler fuses into one load and a byte swap. It is
+// still a call: the inliner scores the pre-optimisation form at 89 against a
+// budget of 80, so it does not quite fit however this is arranged.
 func (r *Reader) Peek64() uint64 {
 	idx := r.pos >> 3
 	if idx+8 <= len(r.data) {
 		return binary.BigEndian.Uint64(r.data[idx:]) << uint(r.pos&7)
 	}
+	return r.peekTail()
+}
+
+//go:noinline
+func (r *Reader) peekTail() uint64 {
+	idx := r.pos >> 3
 	var w uint64
 	for i := 0; i < 8; i++ {
 		var b byte
@@ -82,15 +92,22 @@ func (w *Writer) Write(v uint32, n int) { w.put(uint64(v), n) }
 // Callers that assemble a whole field group in a register can hand it over in one
 // call instead of several.
 func (w *Writer) Write64(v uint64, n int) {
-	if n > 32 {
+	// Anything up to 57 bits still lands inside a single 64-bit window whatever
+	// the misalignment, so it needs only one read-modify-write. Nothing in the
+	// bitstream is wider than that — a coefficient pair is at most 47 bits — so
+	// the split path exists only for completeness.
+	if n > maxPut {
 		w.put(v>>32, n-32)
 		n = 32
 	}
 	w.put(v, n)
 }
 
-// put merges up to 32 bits into the buffer. With at most 32 bits of value and 7
-// bits of misalignment, the field always lands inside one 64-bit window.
+// maxPut is the widest field put can merge in one access: 7 bits of possible
+// misalignment plus the field itself must fit in 64.
+const maxPut = 57
+
+// put merges up to maxPut bits into the buffer.
 func (w *Writer) put(v uint64, n int) {
 	if n == 0 {
 		return

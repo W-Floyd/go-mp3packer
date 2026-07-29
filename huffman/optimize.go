@@ -18,19 +18,16 @@ const (
 // with big_values, so it is computed once per boundary.
 type prefixSplit struct {
 	bits    int32
-	ready   bool
 	ok      bool
 	region0 int8
 	table0  int8
 	table1  int8
 }
 
-// region caches one span's cheapest table. Spans between two band boundaries do
-// not move with big_values, so once computed they stand for the whole search.
+// region is one span's cheapest table and what it costs.
 type region struct {
 	bits  int32
 	table int8
-	set   bool
 }
 
 // scratch is the working set of one Optimize call. It is pooled because the
@@ -57,13 +54,13 @@ type scratch struct {
 	// vector pass per candidate.
 	tails [numRows]uint32
 
-	// head[i] covers the pairs below boundary i and mid[i][j] those between two
-	// boundaries; neither depends on big_values. The head costs are wanted for
-	// every candidate, so they are filled in one pass rather than on demand.
-	head   [numRows]region
-	headN  int
-	mid    [numBands][numBands]region
-	prefix [numBands]prefixSplit
+	// head[i] covers the pairs below boundary i, which does not depend on
+	// big_values. The head costs are wanted for every candidate, so they are
+	// filled in one pass rather than on demand.
+	head    [numRows]region
+	headN   int
+	prefix  [numBands]prefixSplit
+	prefixN int
 
 	// Cost of coding the tail of the spectrum as count1 quadruples starting at
 	// each even coefficient, with either count1 table.
@@ -95,14 +92,29 @@ func (sc *scratch) fillHeads(n int) {
 	}
 }
 
-// midOf returns the cheapest coding of the pairs between two boundaries.
-func (sc *scratch) midOf(i, j int) (int, int32, bool) {
-	e := &sc.mid[i][j]
-	if !e.set {
-		tab, cost := unpackBest(bestTable(sc.row(i), sc.row(j)))
-		e.bits, e.table, e.set = cost, int8(tab), true
+// fillPrefixes settles the best two-region cover below each boundary up to n.
+// Like the head costs, none of it moves with big_values, so each boundary is
+// computed the first time the search can reach it and only read thereafter.
+func (sc *scratch) fillPrefixes(n int) {
+	for ; sc.prefixN < n; sc.prefixN++ {
+		j := sc.prefixN
+		p := &sc.prefix[j]
+		*p = prefixSplit{}
+		for i := max(1, j-8); i <= min(16, j-1); i++ {
+			t0, bits0 := int(sc.head[i].table), sc.head[i].bits
+			if bits0 < 0 {
+				continue
+			}
+			t1, bits1 := unpackBest(bestTable(sc.row(i), sc.row(j)))
+			if bits1 < 0 {
+				continue
+			}
+			if !p.ok || bits0+bits1 < p.bits {
+				p.ok, p.bits = true, bits0+bits1
+				p.region0, p.table0, p.table1 = int8(i), int8(t0), int8(t1)
+			}
+		}
 	}
-	return int(e.table), e.bits, e.bits >= 0
 }
 
 // Optimize searches for the cheapest legal Huffman coding of s and returns the
@@ -138,14 +150,7 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 	}
 	sc.acc = [numTables]int32{}
 	sc.headN = 0
-	for i := range sc.mid {
-		for j := range sc.mid[i] {
-			sc.mid[i][j].set = false
-		}
-	}
-	for i := range sc.prefix {
-		sc.prefix[i].ready = false
-	}
+	sc.prefixN = 0
 	buildCount1Costs(sc, s, last, 2*lastBig)
 
 	b := bands(sampleRate)
@@ -217,8 +222,17 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		bestTables = [3]int{t0, t1, t2}
 	}
 
+	// nTail is how many band boundaries lie strictly below big_values. Because
+	// boundary is sorted, it is the only thing the candidate enumeration needs to
+	// know about bv: "boundary[i] >= bv" is exactly "i >= nTail". Every test below
+	// is that identity applied, which is why none of them scan. And since bv only
+	// grows, nTail is carried across candidates rather than recounted.
+	nTail := 0
 	for bv = lastBig; bv <= maxBV; bv++ {
 		bv32 := int32(bv)
+		for nTail < numBands && boundary[nTail] < bv32 {
+			nTail++
+		}
 
 		var ok bool
 		c1Table, c1Bits, ok = count1Cost(sc, bv)
@@ -230,10 +244,6 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// Spans ending at big_values are the only ones that move with it, and they
 		// all share that endpoint, so they are computed together: one pass over the
 		// snapshot rows, 32 tables at a time.
-		nTail := 0
-		for nTail < numBands && boundary[nTail] < bv32 {
-			nTail++
-		}
 		if nTail > 0 {
 			bestTails(sc.rows[:nTail*numTables], &sc.acc, sc.tails[:nTail])
 			sc.fillHeads(nTail)
@@ -278,13 +288,11 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// than by (region0_count, region1_count).
 
 		// One region: the first region0 boundary at or beyond big_values swallows
-		// everything, and no larger region0_count can do anything different.
+		// everything, and no larger region0_count can do anything different. That
+		// boundary is max(1, nTail), if region0_count can reach it at all.
 		firstAbove := -1
-		for i := 1; i <= 16; i++ {
-			if boundary[i] >= bv32 {
-				firstAbove = i
-				break
-			}
+		if nTail <= 16 {
+			firstAbove = max(1, nTail)
 		}
 		if firstAbove >= 0 {
 			if bv == 0 {
@@ -300,20 +308,21 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 
 		// Two regions: region1 runs from a boundary to big_values, which needs a
 		// region1_count large enough to reach at or past it.
-		for i := 1; i <= last0; i++ {
-			if boundary[min(i+8, numBands-1)] < bv32 {
+		// region1_count tops out at 7, so a region0 boundary below nTail-8 can never
+		// stretch region1 up to big_values; starting there skips the dead prefix
+		// instead of testing and rejecting it.
+		for i := max(1, nTail-8); i <= last0; i++ {
+			if min(i+8, numBands-1) < nTail {
 				continue // region2 cannot be empty for this region0 boundary
 			}
 			t0, bits0 := int(sc.head[i].table), sc.head[i].bits
 			if bits0 < 0 {
 				continue
 			}
-			r1 := 0
-			for ; r1 < 8; r1++ {
-				if boundary[min(i+r1+1, numBands-1)] >= bv32 {
-					break
-				}
-			}
+			// The smallest region1_count whose boundary reaches big_values. The
+			// test above guarantees region1_count 7 does, so this cannot overflow
+			// the field.
+			r1 := max(0, nTail-i-1)
 			if t1, bits1 := unpackBest(sc.tails[i]); bits1 >= 0 {
 				consider(bits0+bits1, i-1, r1, t0, t1, 0)
 			}
@@ -322,25 +331,9 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// Three regions: regions 0 and 1 cover everything below a boundary and
 		// neither moves with big_values, so the best pair of them is computed once
 		// per boundary and reused; only the tail has to be recomputed.
+		sc.fillPrefixes(nTail)
 		for j := 2; j < nTail; j++ {
 			p := &sc.prefix[j]
-			if !p.ready {
-				*p = prefixSplit{ready: true}
-				for i := max(1, j-8); i <= min(16, j-1); i++ {
-					t0, bits0 := int(sc.head[i].table), sc.head[i].bits
-					if bits0 < 0 {
-						continue
-					}
-					t1, bits1, ok1 := sc.midOf(i, j)
-					if !ok1 {
-						continue
-					}
-					if !p.ok || bits0+bits1 < p.bits {
-						p.ok, p.bits = true, bits0+bits1
-						p.region0, p.table0, p.table1 = int8(i), int8(t0), int8(t1)
-					}
-				}
-			}
 			if !p.ok {
 				continue
 			}
@@ -379,17 +372,24 @@ func buildCount1Costs(sc *scratch, s *Spectrum, last, from int) {
 			// would drop a coefficient.
 			sc.c1Usable[pos] = false
 		default:
-			sym, signs := 0, int32(0)
-			for i := 0; i < 4; i++ {
-				if s[pos+i] != 0 {
-					sym |= 1 << uint(3-i)
-					signs++
-				}
+			q := s[pos : pos+4 : pos+4]
+			sym := 0
+			if q[0] != 0 {
+				sym |= 8
 			}
-			c32, c33 := encodeTables[count1Table32][sym], encodeTables[count1Table33][sym]
-			sc.c1Usable[pos] = c32.valid && c33.valid
-			sc.c1Bits32[pos] = sc.c1Bits32[pos+4] + int32(c32.length) + signs
-			sc.c1Bits33[pos] = sc.c1Bits33[pos+4] + int32(c33.length) + signs
+			if q[1] != 0 {
+				sym |= 4
+			}
+			if q[2] != 0 {
+				sym |= 2
+			}
+			if q[3] != 0 {
+				sym |= 1
+			}
+			d := &count1Delta[sym]
+			sc.c1Usable[pos] = count1Valid[sym]
+			sc.c1Bits32[pos] = sc.c1Bits32[pos+4] + d[0]
+			sc.c1Bits33[pos] = sc.c1Bits33[pos+4] + d[1]
 		}
 	}
 }

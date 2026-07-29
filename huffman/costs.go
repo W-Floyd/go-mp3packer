@@ -28,6 +28,13 @@ var (
 	// per-pair cost to two table rows, both indexed by small integers, which is
 	// what makes the accumulation loop vectorisable.
 	escapeCostTable [16][numTables]int32
+
+	// count1Delta[sym] is what a count1 quadruple whose non-zero pattern is sym
+	// adds to the running cost under each of the two count1 tables: the codeword
+	// length plus one sign bit per non-zero value. Folding the sign count into the
+	// table leaves the tail walk two adds per position.
+	count1Delta [16][2]int32
+	count1Valid [16]bool
 )
 
 func init() {
@@ -57,6 +64,13 @@ func init() {
 			}
 			pairCostTable[sym][tab] = int32(cost)
 		}
+	}
+	for sym := range count1Delta {
+		c32, c33 := encodeTables[count1Table32][sym], encodeTables[count1Table33][sym]
+		signs := int32(bits.OnesCount(uint(sym)))
+		count1Valid[sym] = c32.valid && c33.valid
+		count1Delta[sym][0] = int32(c32.length) + signs
+		count1Delta[sym][1] = int32(c33.length) + signs
 	}
 	for need := range escapeCostTable {
 		for tab := 0; tab < numTables; tab++ {

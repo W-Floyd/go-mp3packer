@@ -246,7 +246,7 @@ type Capacity struct {
 // version, samplerate, channel mode and CRC setting, in ascending order of
 // data capacity (each bitrate unpadded, then padded).
 func (h Header) Capacities() []Capacity {
-	overhead := 4 + h.crcSize() + h.SideInfoSize()
+	overhead := h.overhead()
 	caps := make([]Capacity, 0, 2*MaxBitrateIndex)
 	for idx := 1; idx <= MaxBitrateIndex; idx++ {
 		base := unpaddedFrameSize(h.Version, h.SampleRate, bitrateTable[h.Version][idx]) - overhead
@@ -256,6 +256,35 @@ func (h Header) Capacities() []Capacity {
 		)
 	}
 	return caps
+}
+
+func (h Header) overhead() int { return 4 + h.crcSize() + h.SideInfoSize() }
+
+// MaxDataSize is the data capacity of the largest frame this header can
+// describe, which is the last entry Capacities would return.
+func (h Header) MaxDataSize() int {
+	return unpaddedFrameSize(h.Version, h.SampleRate, bitrateTable[h.Version][MaxBitrateIndex]) -
+		h.overhead() + 1
+}
+
+// SmallestCapacity is the cheapest frame size that can carry want bytes of main
+// data, or the largest available if none can. It answers the same question as
+// scanning Capacities without building the slice, which matters because the
+// layout pass asks once per frame.
+func (h Header) SmallestCapacity(want int) Capacity {
+	overhead := h.overhead()
+	last := Capacity{}
+	for idx := 1; idx <= MaxBitrateIndex; idx++ {
+		base := unpaddedFrameSize(h.Version, h.SampleRate, bitrateTable[h.Version][idx]) - overhead
+		if base >= want {
+			return Capacity{Index: idx, Padding: false, DataSize: base}
+		}
+		if base+1 >= want {
+			return Capacity{Index: idx, Padding: true, DataSize: base + 1}
+		}
+		last = Capacity{Index: idx, Padding: true, DataSize: base + 1}
+	}
+	return last
 }
 
 // SamplesPerFrame is 1152 for MPEG-1 and 576 for the LSF versions.
