@@ -18,7 +18,15 @@ var laneIndex = [numTables]int32{
 func accumulate(acc *[numTables]int32, keys []uint32)
 
 // bestTable returns the cheapest table for the region between two prefix rows,
-// packed as cost<<5 | table.
+// packed as cost<<5 | table. Both rows are pre-scaled by 32.
 //
 //go:noescape
 func bestTable(from, to *[numTables]int32) uint32
+
+// bestTails is bestTable over a run of pre-scaled rows sharing the same upper
+// endpoint, which is acc and is not pre-scaled: one answer per entry of out, from
+// the matching 32-lane row. Batching them keeps acc in registers and pays the call
+// cost once instead of two dozen times.
+//
+//go:noescape
+func bestTails(rows []int32, acc *[numTables]int32, out []uint32)

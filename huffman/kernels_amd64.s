@@ -122,7 +122,6 @@ done:
 	MOVOU off(BX), X1     \
 	MOVOU off(AX), X2     \
 	PSUBL X2, X1          \
-	PSLLL $5, X1          \
 	MOVOU off(DI), X2     \
 	POR   X2, X1          \
 	MOVOU X0, X2          \
@@ -138,13 +137,12 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	MOVQ to+8(FP), BX
 	LEAQ ·laneIndex(SB), DI
 
-	// key = (to - from) << 5 | lane. Costs are non-negative and bounded well
-	// below 2^26, so the shift cannot reach the sign bit and a signed comparison
-	// orders the keys correctly.
+	// Both rows arrive scaled by 32, so their difference already has room for the
+	// lane label. Costs are non-negative and bounded well below 2^26, so nothing
+	// reaches the sign bit and a signed comparison orders the keys correctly.
 	MOVOU 0(BX), X0
 	MOVOU 0(AX), X2
 	PSUBL X2, X0
-	PSLLL $5, X0
 	MOVOU 0(DI), X2
 	POR   X2, X0
 
@@ -174,4 +172,105 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	PXOR   X2, X0
 
 	MOVL X0, ret+16(FP)
+	RET
+
+// tailMin folds one group of four lanes of a row into the running minimum in X8,
+// where the group's accumulator is already shifted with its lanes folded in.
+#define TAILMIN(reg, off) \
+	MOVOU off(SI), X9  \
+	MOVOU reg, X10     \
+	PSUBL X9, X10      \
+	MOVOU X8, X9       \
+	PXOR  X10, X9      \
+	MOVOU X8, X11      \
+	PCMPGTL X10, X11   \
+	PAND  X11, X9      \
+	PXOR  X9, X8
+
+// func bestTails(rows []int32, acc *[32]int32, out []uint32)
+TEXT ·bestTails(SB), NOSPLIT, $0-56
+	MOVQ rows_base+0(FP), SI
+	MOVQ acc+24(FP), AX
+	MOVQ out_base+32(FP), DI
+	MOVQ out_len+40(FP), CX
+	TESTQ CX, CX
+	JZ    tailsdone
+
+	LEAQ ·laneIndex(SB), BX
+
+	// acc and the lane labels stay in registers for the whole run: X0-X7 hold
+	// acc<<5 with the lane already folded in, so each row costs one subtract per
+	// group and the table index falls out of the minimum.
+	MOVOU 0(AX), X0
+	MOVOU 16(AX), X1
+	MOVOU 32(AX), X2
+	MOVOU 48(AX), X3
+	MOVOU 64(AX), X4
+	MOVOU 80(AX), X5
+	MOVOU 96(AX), X6
+	MOVOU 112(AX), X7
+	PSLLL $5, X0
+	PSLLL $5, X1
+	PSLLL $5, X2
+	PSLLL $5, X3
+	PSLLL $5, X4
+	PSLLL $5, X5
+	PSLLL $5, X6
+	PSLLL $5, X7
+	MOVOU 0(BX), X8
+	POR   X8, X0
+	MOVOU 16(BX), X8
+	POR   X8, X1
+	MOVOU 32(BX), X8
+	POR   X8, X2
+	MOVOU 48(BX), X8
+	POR   X8, X3
+	MOVOU 64(BX), X8
+	POR   X8, X4
+	MOVOU 80(BX), X8
+	POR   X8, X5
+	MOVOU 96(BX), X8
+	POR   X8, X6
+	MOVOU 112(BX), X8
+	POR   X8, X7
+
+tailsloop:
+	// The rows are already scaled: (acc<<5 | lane) - (row<<5) is (acc-row)<<5 |
+	// lane, because the shift leaves the low five bits clear.
+	MOVOU 0(SI), X9
+	MOVOU X0, X8
+	PSUBL X9, X8
+
+	TAILMIN(X1, 16)
+	TAILMIN(X2, 32)
+	TAILMIN(X3, 48)
+	TAILMIN(X4, 64)
+	TAILMIN(X5, 80)
+	TAILMIN(X6, 96)
+	TAILMIN(X7, 112)
+
+	// Fold the four remaining lanes: swap pairs, then halves.
+	PSHUFD $0xB1, X8, X9
+	MOVOU  X8, X10
+	PXOR   X9, X10
+	MOVOU  X8, X11
+	PCMPGTL X9, X11
+	PAND   X11, X10
+	PXOR   X10, X8
+
+	PSHUFD $0x4E, X8, X9
+	MOVOU  X8, X10
+	PXOR   X9, X10
+	MOVOU  X8, X11
+	PCMPGTL X9, X11
+	PAND   X11, X10
+	PXOR   X10, X8
+
+	MOVL  X8, (DI)
+	ADDQ  $4, DI
+	ADDQ  $128, SI
+	DECQ  CX
+	JNZ   tailsloop
+
+tailsdone:
 	RET

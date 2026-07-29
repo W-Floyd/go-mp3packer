@@ -66,11 +66,13 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 	pos := 0
 
 	// The bit limit is checked once per pair, never mid-symbol: a codeword that
-	// starts inside the granule is read whole, matching how decoders behave.
-	// A whole pair — code, escape magnitudes and signs — is at most 47 bits, so it
-	// is decoded out of a single peeked word rather than bit by bit.
+	// starts inside the granule is read whole, matching how decoders behave. A
+	// whole pair — code, escape magnitudes and signs — is at most 47 bits, so it
+	// comes out of one peeked word rather than bit by bit, and the first eight bits
+	// usually resolve the codeword in a single table lookup.
 	region := func(pairs, idx int) bool {
 		tree := tables[idx].tree
+		lut := &decodeTables[idx]
 		linbits := uint(tables[idx].linbits)
 		end := pos + 2*pairs
 		for pos < end && pos < NumCoefficients-1 {
@@ -81,51 +83,59 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 				return false
 			}
 			w := r.Peek64()
-			used := 0
-			node := 0
-			for {
-				v := tree[node]
-				if v >= 0 {
-					x, y := int(v>>4)&0xF, int(v)&0xF
-					if x > 0 {
-						if x == 15 && linbits > 0 {
-							x += int(w >> (64 - linbits))
-							w <<= linbits
-							used += int(linbits)
-						}
-						if w>>63 != 0 {
-							x = -x
-						}
-						w <<= 1
-						used++
+			var sym, used int
+			if e := lut[w>>56]; !e.isLong() {
+				sym, used = e.symbol(), e.length()
+				w <<= uint(used)
+			} else {
+				node := e.node()
+				used, w = 8, w<<8
+				for {
+					v := tree[node]
+					if v >= 0 {
+						sym = int(v)
+						break
 					}
-					if y > 0 {
-						if y == 15 && linbits > 0 {
-							y += int(w >> (64 - linbits))
-							w <<= linbits
-							used += int(linbits)
-						}
-						if w>>63 != 0 {
-							y = -y
-						}
-						used++
+					node++
+					if w>>63 != 0 {
+						node -= int(v)
 					}
-					dst[pos], dst[pos+1] = x, y
-					pos += 2
-					r.Skip(used)
-					break
+					w <<= 1
+					used++
+					if node >= len(tree) {
+						r.Skip(used)
+						return false
+					}
 				}
-				node++
+			}
+
+			x, y := sym>>4&0xF, sym&0xF
+			if x > 0 {
+				if x == 15 && linbits > 0 {
+					x += int(w >> (64 - linbits))
+					w <<= linbits
+					used += int(linbits)
+				}
 				if w>>63 != 0 {
-					node -= int(v)
+					x = -x
 				}
 				w <<= 1
 				used++
-				if node >= len(tree) {
-					r.Skip(used)
-					return false
-				}
 			}
+			if y > 0 {
+				if y == 15 && linbits > 0 {
+					y += int(w >> (64 - linbits))
+					w <<= linbits
+					used += int(linbits)
+				}
+				if w>>63 != 0 {
+					y = -y
+				}
+				used++
+			}
+			dst[pos], dst[pos+1] = x, y
+			pos += 2
+			r.Skip(used)
 		}
 		return true
 	}
@@ -142,44 +152,30 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 	// Everything past the big values is coded as quadruples of -1, 0 or 1 until
 	// the granule's bits run out.
 	if ok {
-		tree := tables[cfg.Count1Table].tree
+		lut := &decodeTables[cfg.Count1Table]
 		for pos <= NumCoefficients-4 && r.Tell() < limit {
 			w := r.Peek64()
-			used, node := 0, 0
-			for {
-				v := tree[node]
-				if v >= 0 {
-					for bit := 3; bit >= 0; bit-- {
-						val := 0
-						if int(v)&(1<<uint(bit)) != 0 {
-							val = 1
-							if w>>63 != 0 {
-								val = -1
-							}
-							w <<= 1
-							used++
-						}
-						dst[pos] = val
-						pos++
-					}
-					r.Skip(used)
-					break
-				}
-				node++
-				if w>>63 != 0 {
-					node -= int(v)
-				}
-				w <<= 1
-				used++
-				if node >= len(tree) {
-					r.Skip(used)
-					ok = false
-					break
-				}
-			}
-			if !ok {
+			e := lut[w>>56]
+			if e.isLong() {
+				ok = false // no count1 codeword exceeds six bits
 				break
 			}
+			sym, used := e.symbol(), e.length()
+			w <<= uint(used)
+			for bit := 3; bit >= 0; bit-- {
+				val := 0
+				if sym&(1<<uint(bit)) != 0 {
+					val = 1
+					if w>>63 != 0 {
+						val = -1
+					}
+					w <<= 1
+					used++
+				}
+				dst[pos] = val
+				pos++
+			}
+			r.Skip(used)
 		}
 	}
 	if r.Tell() > r.Len() {

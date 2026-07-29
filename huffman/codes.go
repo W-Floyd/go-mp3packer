@@ -18,8 +18,25 @@ type code struct {
 // the big-value tables; the count1 tables use only indices 0..15.
 type encodeTable [256]code
 
+// decodeEntry resolves the first eight bits of a codeword in one lookup: either
+// the whole symbol, or where in the tree to carry on from. Packed into a word so
+// the decoder loads it in one go — symbol in bits 0..7, code length in 8..12, the
+// long-code flag in 13, and the tree position to resume from in 16..31.
+type decodeEntry uint32
+
+const decodeLong = 1 << 13
+
+func (e decodeEntry) isLong() bool { return e&decodeLong != 0 }
+func (e decodeEntry) symbol() int  { return int(e) & 0xFF }
+func (e decodeEntry) length() int  { return int(e>>8) & 0x1F }
+func (e decodeEntry) node() int    { return int(e >> 16) }
+
 var (
 	encodeTables [34]encodeTable
+
+	// decodeTables[table][first 8 bits] short-circuits the tree walk. Most
+	// codewords are eight bits or fewer, so most symbols cost one lookup.
+	decodeTables [34][256]decodeEntry
 	// maxQuant is the largest absolute coefficient a table can represent, or -1
 	// for the two undefined tables, which must never be selected.
 	maxQuant [34]int
@@ -29,6 +46,7 @@ func init() {
 	for i := range tables {
 		encodeTables[i] = buildEncodeTable(i)
 		maxQuant[i] = tableMaxQuant(i, &encodeTables[i])
+		buildDecodeTable(i, &decodeTables[i])
 	}
 }
 
@@ -64,6 +82,40 @@ func buildEncodeTable(idx int) encodeTable {
 		// Leaves at or above 256 are escape entries with no encodable symbol.
 	}
 	return out
+}
+
+// buildDecodeTable walks each possible eight-bit prefix through the decode tree,
+// recording the symbol if the walk finishes and the tree position if it does not.
+func buildDecodeTable(idx int, out *[256]decodeEntry) {
+	tree := tables[idx].tree
+	if len(tree) == 0 {
+		return
+	}
+	for prefix := 0; prefix < 256; prefix++ {
+		node, used := 0, 0
+		for {
+			v := tree[node]
+			if v >= 0 {
+				out[prefix] = decodeEntry(uint32(v)&0xFF | uint32(used)<<8)
+				break
+			}
+			if used == 8 {
+				out[prefix] = decodeEntry(decodeLong | uint32(node)<<16)
+				break
+			}
+			node++
+			if prefix&(1<<uint(7-used)) != 0 {
+				node -= int(v)
+			}
+			used++
+			if node >= len(tree) {
+				// Only reachable for the two tables the standard leaves
+				// undefined, which no valid stream selects.
+				out[prefix] = decodeEntry(decodeLong)
+				break
+			}
+		}
+	}
 }
 
 func tableMaxQuant(idx int, t *encodeTable) int {

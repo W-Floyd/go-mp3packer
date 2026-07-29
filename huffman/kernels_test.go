@@ -106,7 +106,9 @@ func TestKernelsMatchPortable(t *testing.T) {
 			from := randomRow(rng, scale)
 			to := randomRow(rng, scale)
 			for i := range to {
-				to[i] += from[i] // prefix sums never decrease
+				// Prefix sums never decrease, and rows are stored pre-scaled.
+				from[i] *= 32
+				to[i] = from[i] + to[i]*32
 			}
 			if got, want := bestTable(from, to), bestTableGo(from, to); got != want {
 				gt, gc := unpackBest(got)
@@ -117,11 +119,42 @@ func TestKernelsMatchPortable(t *testing.T) {
 		}
 	})
 
+	t.Run("bestTails", func(t *testing.T) {
+		for iter := 0; iter < 500; iter++ {
+			n := 1 + rng.Intn(numRows)
+			scale := int32(1 << 10)
+			if iter%3 == 0 {
+				scale = penalty * 8
+			}
+			acc := randomRow(rng, scale*int32(n))
+			rows := make([]int32, n*numTables)
+			for i := 0; i < n; i++ {
+				// Prefix sums only grow, never past the accumulator, and the rows
+				// are stored pre-scaled while the accumulator is not.
+				for t := range acc {
+					rows[i*numTables+t] = rng.Int31n(acc[t]+1) * 32
+				}
+			}
+			got := make([]uint32, n)
+			want := make([]uint32, n)
+			bestTails(rows, acc, got)
+			bestTailsGo(rows, acc, want)
+			for i := range want {
+				if got[i] != want[i] {
+					gt, gc := unpackBest(got[i])
+					wt, wc := unpackBest(want[i])
+					t.Fatalf("iteration %d row %d of %d: got table %d cost %d, want table %d cost %d",
+						iter, i, n, gt, gc, wt, wc)
+				}
+			}
+		}
+	})
+
 	t.Run("bestTable ties", func(t *testing.T) {
 		// Every lane equal: both implementations must pick the lowest index.
 		var from, to [numTables]int32
 		for i := range to {
-			to[i] = 100
+			to[i] = 100 * 32
 		}
 		if got, want := bestTable(&from, &to), bestTableGo(&from, &to); got != want {
 			t.Fatalf("got %#x, want %#x", got, want)
@@ -144,6 +177,27 @@ func BenchmarkKernelAccumulate(b *testing.B) {
 	b.Run("go", func(b *testing.B) {
 		for b.Loop() {
 			accumulateGo(&acc, keys)
+		}
+	})
+}
+
+func BenchmarkKernelBestTails(b *testing.B) {
+	rng := rand.New(rand.NewSource(3))
+	const n = 22
+	acc := randomRow(rng, 1<<14)
+	rows := make([]int32, n*numTables)
+	for i := range rows {
+		rows[i] = rng.Int31n(1<<12) * 32
+	}
+	out := make([]uint32, n)
+	b.Run("asm", func(b *testing.B) {
+		for b.Loop() {
+			bestTails(rows, acc, out)
+		}
+	})
+	b.Run("go", func(b *testing.B) {
+		for b.Loop() {
+			bestTailsGo(rows, acc, out)
 		}
 	})
 }

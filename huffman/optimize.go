@@ -7,45 +7,62 @@ const numBands = 23
 
 // Prefix rows are addressed by slot. Slots 0..numBands-1 are the long-block band
 // boundaries; short blocks put region0's boundary somewhere else entirely, so it
-// gets its own slot; and the last slot is wherever big_values currently sits,
-// which is the accumulator itself.
+// gets its own slot.
 const (
 	shortSlot = numBands
-	bvSlot    = numBands + 1
-	numSlots  = numBands + 2
+	numRows   = numBands + 1
 )
 
+// prefixSplit is the best two-region cover of every pair below a boundary: its
+// cost, where region0 ends, and the tables both regions use. None of it moves
+// with big_values, so it is computed once per boundary.
+type prefixSplit struct {
+	bits    int32
+	ready   bool
+	ok      bool
+	region0 int8
+	table0  int8
+	table1  int8
+}
+
+// region caches one span's cheapest table. Spans between two band boundaries do
+// not move with big_values, so once computed they stand for the whole search.
+type region struct {
+	bits  int32
+	table int8
+	set   bool
+}
+
 // scratch is the working set of one Optimize call. It is pooled because the
-// search runs once per granule — tens of thousands of times per second — and the
-// arrays are far too large to keep reallocating.
+// search runs once per granule — hundreds of thousands of times per second — and
+// the arrays are far too large to keep reallocating.
 type scratch struct {
 	// keys[p] is the packed cost-table index of coefficient pair p.
 	keys [MaxBigValues]uint32
 
-	// acc is the running per-table cost of every pair below the big_values
-	// currently being considered, and rows[i] the same total at band boundary i.
-	// Only these 24 rows are ever needed, so the search never has to materialise
-	// a cost per pair: a query is two rows, laid out so that all 32 tables sit
-	// next to each other.
-	acc  [numTables]int32
-	rows [numSlots - 1][numTables]int32
-
-	// Cheapest table per region, memoised against the slots that delimit it. Any
-	// region ending at big_values has to be recomputed as it moves; every other
-	// entry stays valid for the whole call, which is what makes the search
-	// affordable. One struct per entry, so a lookup is one cache line.
+	// acc is the running per-table cost of every pair below the big_values under
+	// consideration, and rows holds the same totals at each boundary, one 32-lane
+	// row per slot. Only these rows are ever needed, so the search never has to
+	// materialise a cost per pair.
 	//
-	// Region 0 always starts at pair zero and region 2 always ends at big_values,
-	// so those two get flat arrays: the middle region is the only one that needs
-	// both endpoints as a key.
-	head [numSlots]memoEntry
-	mid  [numSlots][numSlots]memoEntry
-	tail [numSlots]memoEntry
+	// The rows are stored pre-scaled by 32 to leave room for a table index in the
+	// low bits, which is how the kernels return the cheapest table alongside its
+	// cost; doing it once per snapshot saves a shift per row per candidate.
+	acc  [numTables]int32
+	rows [numRows * numTables]int32
 
-	// prefix[j] is the cheapest way to cover pairs [0, boundary j) with regions 0
-	// and 1, over every region0 boundary the side info can pair with j. Neither
-	// region moves with big_values, so this is computed once per boundary and then
-	// reused for every big_values above it.
+	// tails[slot] is the cheapest coding of the span from that boundary up to
+	// big_values, packed as cost<<5|table. These are the only region costs that
+	// move as big_values does, so all of them are recomputed together in a single
+	// vector pass per candidate.
+	tails [numRows]uint32
+
+	// head[i] covers the pairs below boundary i and mid[i][j] those between two
+	// boundaries; neither depends on big_values. The head costs are wanted for
+	// every candidate, so they are filled in one pass rather than on demand.
+	head   [numRows]region
+	headN  int
+	mid    [numBands][numBands]region
 	prefix [numBands]prefixSplit
 
 	// Cost of coding the tail of the spectrum as count1 quadruples starting at
@@ -55,31 +72,38 @@ type scratch struct {
 	c1Usable [NumCoefficients + 4]bool
 }
 
-// prefixSplit is the best two-region cover of everything below a boundary: its
-// cost, where region0 ends, and the tables both regions use.
-type prefixSplit struct {
-	bits    int32
-	ready   bool
-	ok      bool
-	region0 int32 // the region0 boundary index that achieved it
-	table0  int8
-	table1  int8
-}
-
-// memoEntry caches one region's cheapest table. stamp records which big_values
-// the entry was computed for, or stampAlways if it cannot go stale.
-type memoEntry struct {
-	stamp int32
-	bits  int32
-	table int8
-}
-
 var scratchPool = sync.Pool{New: func() any { return new(scratch) }}
 
-const (
-	stampUnset  = -1 // entry not computed
-	stampAlways = -2 // entry independent of big_values
-)
+func (sc *scratch) row(slot int) *[numTables]int32 {
+	return (*[numTables]int32)(sc.rows[slot*numTables:])
+}
+
+func (sc *scratch) snapshot(slot int) {
+	row := sc.rows[slot*numTables : (slot+1)*numTables]
+	for i, v := range sc.acc {
+		row[i] = v << 5
+	}
+}
+
+// fillHeads computes the cost of covering the pairs below each boundary up to n
+// with a single table. They do not depend on big_values, so each is computed once.
+func (sc *scratch) fillHeads(n int) {
+	for ; sc.headN < n; sc.headN++ {
+		i := sc.headN
+		tab, cost := unpackBest(bestTable(sc.row(0), sc.row(i)))
+		sc.head[i].bits, sc.head[i].table = cost, int8(tab)
+	}
+}
+
+// midOf returns the cheapest coding of the pairs between two boundaries.
+func (sc *scratch) midOf(i, j int) (int, int32, bool) {
+	e := &sc.mid[i][j]
+	if !e.set {
+		tab, cost := unpackBest(bestTable(sc.row(i), sc.row(j)))
+		e.bits, e.table, e.set = cost, int8(tab), true
+	}
+	return int(e.table), e.bits, e.bits >= 0
+}
 
 // Optimize searches for the cheapest legal Huffman coding of s and returns the
 // configuration that achieves it together with its size in bits.
@@ -112,78 +136,44 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 	for p := 0; p < maxBV; p++ {
 		sc.keys[p] = pairKey(s[2*p], s[2*p+1])
 	}
-	for i := range sc.acc {
-		sc.acc[i] = 0
+	sc.acc = [numTables]int32{}
+	sc.headN = 0
+	for i := range sc.mid {
+		for j := range sc.mid[i] {
+			sc.mid[i][j].set = false
+		}
 	}
 	for i := range sc.prefix {
 		sc.prefix[i].ready = false
 	}
-	for i := range sc.mid {
-		sc.head[i].stamp, sc.tail[i].stamp = stampUnset, stampUnset
-		for j := range sc.mid[i] {
-			sc.mid[i][j].stamp = stampUnset
-		}
-	}
-	buildCount1Costs(sc, s, last)
+	buildCount1Costs(sc, s, last, 2*lastBig)
 
 	b := bands(sampleRate)
-	var boundary [numBands]int32
-	for i := range boundary {
+	var boundary [numRows]int32
+	for i := 0; i < numBands; i++ {
 		boundary[i] = int32(b[i] / 2)
 	}
-	shortBound := int32(bandsShort(sampleRate)[3] / 2 * 3)
+	boundary[shortSlot] = int32(bandsShort(sampleRate)[3] / 2 * 3)
 
 	// Every prefix the search needs a snapshot of, in the order the accumulator
 	// will reach them.
-	var snapPos, snapSlot [numSlots - 1]int32
+	var snapPos, snapSlot [numRows]int32
 	n, inserted := 0, false
 	for i := 0; i < numBands; i++ {
-		if !inserted && shortBound < boundary[i] {
-			snapPos[n], snapSlot[n] = shortBound, shortSlot
+		if !inserted && boundary[shortSlot] < boundary[i] {
+			snapPos[n], snapSlot[n] = boundary[shortSlot], shortSlot
 			n, inserted = n+1, true
 		}
 		snapPos[n], snapSlot[n] = boundary[i], int32(i)
 		n++
 	}
 	if !inserted {
-		snapPos[n], snapSlot[n] = shortBound, shortSlot
+		snapPos[n], snapSlot[n] = boundary[shortSlot], shortSlot
 	}
-
-	row := func(slot int32) *[numTables]int32 {
-		if slot == bvSlot {
-			return &sc.acc
-		}
-		return &sc.rows[slot]
-	}
-
-	// The three region lookups. Each returns the cheapest table for its span and
-	// caches the answer; entries that cannot go stale as big_values moves are
-	// stamped once and reused for the rest of the call.
-	lookup := func(e *memoEntry, i, j, from, to, bv int32, stable bool) (int, int32, bool) {
-		if from >= to {
-			return 0, 0, true
-		}
-		if e.stamp == stampAlways || e.stamp == bv {
-			return int(e.table), e.bits, e.bits >= 0
-		}
-		tab, cost := unpackBest(bestTable(row(i), row(j)))
-		e.bits, e.table, e.stamp = cost, int8(tab), bv
-		if stable {
-			e.stamp = stampAlways
-		}
-		return tab, cost, cost >= 0
-	}
-
-	// The winner is remembered as plain numbers: copying a Config for every one
-	// of the tens of thousands of combinations considered costs more than the
-	// comparison does.
-	bestBits := -1
-	var bestBV, bestR0, bestR1, bestC1 int
-	var bestTables [3]int
 
 	// The accumulator walks the pairs once, in step with big_values, snapshotting
-	// each band boundary as it passes: every prefix the search can ask about is
-	// either behind it (a snapshot) or exactly at it.
+	// each boundary as it passes: every prefix the search can ask about is either
+	// behind it or exactly at it.
 	pos, nextSnap := 0, 0
 	advance := func(to int) {
 		for nextSnap < len(snapPos) {
@@ -195,7 +185,7 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 				accumulate(&sc.acc, sc.keys[pos:at])
 				pos = at
 			}
-			sc.rows[snapSlot[nextSnap]] = sc.acc
+			sc.snapshot(int(snapSlot[nextSnap]))
 			nextSnap++
 		}
 		if to > pos {
@@ -204,61 +194,91 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		}
 	}
 
-	for bv := lastBig; bv <= maxBV; bv++ {
+	// The winner is remembered as plain numbers: copying a Config for every one of
+	// the combinations considered costs more than the comparison does. Ties go to
+	// the lower region counts and the lower big_values, which is the order the
+	// field values themselves would be searched in.
+	bestBits := -1
+	var bestBV, bestR0, bestR1, bestC1 int
+	var bestTables [3]int
+	bv, c1Table, c1Bits := 0, 0, 0
+	consider := func(bits int32, r0, r1, t0, t1, t2 int) {
+		total := int(bits) + c1Bits
+		if bestBits >= 0 {
+			if total > bestBits {
+				return
+			}
+			if total == bestBits && (bv != bestBV || r0 > bestR0 || (r0 == bestR0 && r1 >= bestR1)) {
+				return
+			}
+		}
+		bestBits, bestBV, bestC1 = total, bv, c1Table
+		bestR0, bestR1 = r0, r1
+		bestTables = [3]int{t0, t1, t2}
+	}
+
+	for bv = lastBig; bv <= maxBV; bv++ {
 		bv32 := int32(bv)
 
-		c1Table, c1Bits, ok := count1Cost(sc, bv)
+		var ok bool
+		c1Table, c1Bits, ok = count1Cost(sc, bv)
 		if !ok {
 			continue
 		}
 		advance(bv)
 
+		// Spans ending at big_values are the only ones that move with it, and they
+		// all share that endpoint, so they are computed together: one pass over the
+		// snapshot rows, 32 tables at a time.
+		nTail := 0
+		for nTail < numBands && boundary[nTail] < bv32 {
+			nTail++
+		}
+		if nTail > 0 {
+			bestTails(sc.rows[:nTail*numTables], &sc.acc, sc.tails[:nTail])
+			sc.fillHeads(nTail)
+		}
+
 		if orig.WindowSwitching {
 			// Only region0's boundary and two tables are ours to choose; the
 			// geometry comes from the block type.
-			split, slot, stable := boundary[8], int32(8), true
+			slot := 8
 			if orig.BlockType == 2 {
-				split, slot = shortBound, shortSlot
+				slot = shortSlot
 			}
-			if split >= bv32 {
-				split, slot, stable = bv32, bvSlot, false
-			}
-			t0, bits0, ok0 := lookup(&sc.head[slot], 0, slot, 0, split, bv32, stable)
-			t1, bits1, ok1 := lookup(&sc.tail[slot], slot, bvSlot, split, bv32, bv32, false)
-			if !ok0 || !ok1 {
+			if boundary[slot] >= bv32 {
+				// Region0 already covers every pair there is.
+				if bv == 0 {
+					consider(0, 0, 0, 0, 0, 0)
+				} else if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
+					consider(bits0, 0, 0, t0, 0, 0)
+				}
 				continue
 			}
-			if total := int(bits0+bits1) + c1Bits; bestBits < 0 || total < bestBits {
-				bestBits, bestBV, bestC1 = total, bv, c1Table
-				bestTables = [3]int{t0, t1, 0}
+			sc.fillHeads(slot + 1)
+			t0, bits0 := int(sc.head[slot].table), sc.head[slot].bits
+			if bits0 < 0 {
+				continue
 			}
+			// The short-block boundary has no place in the band ordering, so its
+			// tail is not part of the batch; run it as a batch of one.
+			if slot >= nTail {
+				bestTails(sc.rows[slot*numTables:(slot+1)*numTables], &sc.acc, sc.tails[slot:slot+1])
+			}
+			t1, bits1 := unpackBest(sc.tails[slot])
+			if bits1 < 0 {
+				continue
+			}
+			consider(bits0+bits1, 0, 0, t0, t1, 0)
 			continue
 		}
 
-		// Everything below is a split of the pairs [0, big_values) into one, two or
-		// three regions at band boundaries, so enumerate by shape rather than by
-		// (region0_count, region1_count): only regions that end at big_values move
-		// with it, and the rest are already cached.
-		//
-		// Ties are resolved towards the lower region counts, and towards the lower
-		// big_values, which is the order the field values would be searched in.
-		consider := func(bits int32, r0, r1, t0, t1, t2 int) {
-			total := int(bits) + c1Bits
-			if bestBits >= 0 {
-				if total > bestBits {
-					return
-				}
-				if total == bestBits && (bv != bestBV || r0 > bestR0 || (r0 == bestR0 && r1 >= bestR1)) {
-					return
-				}
-			}
-			bestBits, bestBV, bestC1 = total, bv, c1Table
-			bestR0, bestR1 = r0, r1
-			bestTables = [3]int{t0, t1, t2}
-		}
+		// Every remaining candidate is a split of the pairs [0, big_values) into
+		// one, two or three regions at band boundaries, enumerated by shape rather
+		// than by (region0_count, region1_count).
 
 		// One region: the first region0 boundary at or beyond big_values swallows
-		// everything, and no later one can do anything different.
+		// everything, and no larger region0_count can do anything different.
 		firstAbove := -1
 		for i := 1; i <= 16; i++ {
 			if boundary[i] >= bv32 {
@@ -267,24 +287,25 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			}
 		}
 		if firstAbove >= 0 {
-			if t0, bits0, ok0 := lookup(&sc.head[bvSlot], 0, bvSlot, 0, bv32, bv32, false); ok0 {
+			if bv == 0 {
+				consider(0, firstAbove-1, 0, 0, 0, 0)
+			} else if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
 				consider(bits0, firstAbove-1, 0, t0, 0, 0)
 			}
 		}
-
 		last0 := 16
 		if firstAbove >= 0 {
-			last0 = firstAbove - 1 // beyond this, region0 already covers everything
+			last0 = firstAbove - 1
 		}
 
-		// Two regions: region0 up to a boundary, region1 from there to big_values,
-		// which needs a region1_count large enough to reach at or past it.
+		// Two regions: region1 runs from a boundary to big_values, which needs a
+		// region1_count large enough to reach at or past it.
 		for i := 1; i <= last0; i++ {
 			if boundary[min(i+8, numBands-1)] < bv32 {
 				continue // region2 cannot be empty for this region0 boundary
 			}
-			t0, bits0, ok0 := lookup(&sc.head[int32(i)], 0, int32(i), 0, boundary[i], bv32, true)
-			if !ok0 {
+			t0, bits0 := int(sc.head[i].table), sc.head[i].bits
+			if bits0 < 0 {
 				continue
 			}
 			r1 := 0
@@ -293,7 +314,7 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 					break
 				}
 			}
-			if t1, bits1, ok1 := lookup(&sc.tail[int32(i)], int32(i), bvSlot, boundary[i], bv32, bv32, false); ok1 {
+			if t1, bits1 := unpackBest(sc.tails[i]); bits1 >= 0 {
 				consider(bits0+bits1, i-1, r1, t0, t1, 0)
 			}
 		}
@@ -301,33 +322,30 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		// Three regions: regions 0 and 1 cover everything below a boundary and
 		// neither moves with big_values, so the best pair of them is computed once
 		// per boundary and reused; only the tail has to be recomputed.
-		for j := 2; j <= numBands-1; j++ {
-			if boundary[j] >= bv32 {
-				break
-			}
+		for j := 2; j < nTail; j++ {
 			p := &sc.prefix[j]
 			if !p.ready {
 				*p = prefixSplit{ready: true}
 				for i := max(1, j-8); i <= min(16, j-1); i++ {
-					t0, bits0, ok0 := lookup(&sc.head[int32(i)], 0, int32(i), 0, boundary[i], bv32, true)
-					if !ok0 {
+					t0, bits0 := int(sc.head[i].table), sc.head[i].bits
+					if bits0 < 0 {
 						continue
 					}
-					t1, bits1, ok1 := lookup(&sc.mid[i][j], int32(i), int32(j), boundary[i], boundary[j], bv32, true)
+					t1, bits1, ok1 := sc.midOf(i, j)
 					if !ok1 {
 						continue
 					}
 					if !p.ok || bits0+bits1 < p.bits {
 						p.ok, p.bits = true, bits0+bits1
-						p.region0, p.table0, p.table1 = int32(i), int8(t0), int8(t1)
+						p.region0, p.table0, p.table1 = int8(i), int8(t0), int8(t1)
 					}
 				}
 			}
 			if !p.ok {
 				continue
 			}
-			t2, bits2, ok2 := lookup(&sc.tail[int32(j)], int32(j), bvSlot, boundary[j], bv32, bv32, false)
-			if !ok2 {
+			t2, bits2 := unpackBest(sc.tails[j])
+			if bits2 < 0 {
 				continue
 			}
 			i := int(p.region0)
@@ -348,11 +366,11 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 }
 
 // buildCount1Costs fills in the cost of coding the spectrum tail as count1
-// quadruples from every even start position. Each start is one quadruple plus the
-// cost four coefficients later, so one backward walk serves every candidate
-// big_values.
-func buildCount1Costs(sc *scratch, s *Spectrum, last int) {
-	for pos := NumCoefficients; pos >= 0; pos -= 2 {
+// quadruples from every even start position down to from. Each start is one
+// quadruple plus the cost four coefficients later, so one backward walk serves
+// every candidate big_values.
+func buildCount1Costs(sc *scratch, s *Spectrum, last, from int) {
+	for pos := NumCoefficients; pos >= from; pos -= 2 {
 		switch {
 		case pos >= last:
 			sc.c1Bits32[pos], sc.c1Bits33[pos], sc.c1Usable[pos] = 0, 0, true

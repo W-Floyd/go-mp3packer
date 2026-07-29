@@ -84,9 +84,9 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	VLD1.P 64(R2), [V16.S4, V17.S4, V18.S4, V19.S4]
 	VLD1   (R2), [V20.S4, V21.S4, V22.S4, V23.S4]
 
-	// key = (to - from) << 5 | lane. Costs are non-negative and bounded well
-	// below 2^26, so the shift cannot reach the sign bit and an unsigned minimum
-	// is also the signed one.
+	// Both rows arrive scaled by 32, so their difference already has room for the
+	// lane label. Costs are non-negative and bounded well below 2^26, so nothing
+	// reaches the sign bit and an unsigned minimum is also the signed one.
 	VSUB V0.S4, V8.S4, V8.S4
 	VSUB V1.S4, V9.S4, V9.S4
 	VSUB V2.S4, V10.S4, V10.S4
@@ -95,15 +95,6 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	VSUB V5.S4, V13.S4, V13.S4
 	VSUB V6.S4, V14.S4, V14.S4
 	VSUB V7.S4, V15.S4, V15.S4
-
-	VSHL $5, V8.S4, V8.S4
-	VSHL $5, V9.S4, V9.S4
-	VSHL $5, V10.S4, V10.S4
-	VSHL $5, V11.S4, V11.S4
-	VSHL $5, V12.S4, V12.S4
-	VSHL $5, V13.S4, V13.S4
-	VSHL $5, V14.S4, V14.S4
-	VSHL $5, V15.S4, V15.S4
 
 	VORR V16.B16, V8.B16, V8.B16
 	VORR V17.B16, V9.B16, V9.B16
@@ -130,4 +121,77 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 
 	VMOV V8.S[0], R3
 	MOVW R3, ret+16(FP)
+	RET
+
+// func bestTails(rows []int32, acc *[32]int32, out []uint32)
+TEXT ·bestTails(SB), NOSPLIT, $0-56
+	MOVD rows_base+0(FP), R0
+	MOVD acc+24(FP), R1
+	MOVD out_base+32(FP), R2
+	MOVD out_len+40(FP), R3
+	CBZ  R3, tailsdone
+
+	MOVD $·laneIndex(SB), R4
+
+	// acc and the lane labels stay in registers for the whole run: V0-V7 hold
+	// acc<<5 with the lane already folded in, so each row costs one subtract per
+	// group and the table index falls out of the minimum.
+	VLD1.P 64(R1), [V0.S4, V1.S4, V2.S4, V3.S4]
+	VLD1   (R1), [V4.S4, V5.S4, V6.S4, V7.S4]
+	VLD1.P 64(R4), [V16.S4, V17.S4, V18.S4, V19.S4]
+	VLD1   (R4), [V20.S4, V21.S4, V22.S4, V23.S4]
+
+	VSHL $5, V0.S4, V0.S4
+	VSHL $5, V1.S4, V1.S4
+	VSHL $5, V2.S4, V2.S4
+	VSHL $5, V3.S4, V3.S4
+	VSHL $5, V4.S4, V4.S4
+	VSHL $5, V5.S4, V5.S4
+	VSHL $5, V6.S4, V6.S4
+	VSHL $5, V7.S4, V7.S4
+
+	VORR V16.B16, V0.B16, V0.B16
+	VORR V17.B16, V1.B16, V1.B16
+	VORR V18.B16, V2.B16, V2.B16
+	VORR V19.B16, V3.B16, V3.B16
+	VORR V20.B16, V4.B16, V4.B16
+	VORR V21.B16, V5.B16, V5.B16
+	VORR V22.B16, V6.B16, V6.B16
+	VORR V23.B16, V7.B16, V7.B16
+
+tailsloop:
+	VLD1.P 64(R0), [V8.S4, V9.S4, V10.S4, V11.S4]
+	VLD1.P 64(R0), [V12.S4, V13.S4, V14.S4, V15.S4]
+
+	// The rows are already scaled: (acc<<5 | lane) - (row<<5) is (acc-row)<<5 |
+	// lane, because the shift leaves the low five bits clear.
+	VSUB V8.S4, V0.S4, V8.S4
+	VSUB V9.S4, V1.S4, V9.S4
+	VSUB V10.S4, V2.S4, V10.S4
+	VSUB V11.S4, V3.S4, V11.S4
+	VSUB V12.S4, V4.S4, V12.S4
+	VSUB V13.S4, V5.S4, V13.S4
+	VSUB V14.S4, V6.S4, V14.S4
+	VSUB V15.S4, V7.S4, V15.S4
+
+	VUMIN V9.S4, V8.S4, V8.S4
+	VUMIN V11.S4, V10.S4, V10.S4
+	VUMIN V13.S4, V12.S4, V12.S4
+	VUMIN V15.S4, V14.S4, V14.S4
+	VUMIN V10.S4, V8.S4, V8.S4
+	VUMIN V14.S4, V12.S4, V12.S4
+	VUMIN V12.S4, V8.S4, V8.S4
+
+	VREV64 V8.S4, V9.S4
+	VUMIN  V9.S4, V8.S4, V8.S4
+	VEXT   $8, V8.B16, V8.B16, V9.B16
+	VUMIN  V9.S4, V8.S4, V8.S4
+
+	VMOV  V8.S[0], R5
+	MOVW  R5, (R2)
+	ADD   $4, R2
+	SUB   $1, R3
+	CBNZ  R3, tailsloop
+
+tailsdone:
 	RET

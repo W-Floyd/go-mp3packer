@@ -101,8 +101,8 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are now well ahead: 4.3 ms versus 22.6 ms to repack an 8-second VBR
-file (Apple M4 Max, both multi-threaded; see below).
+On speed we are well ahead: 2.5 ms versus 22.4 ms to repack an 8-second VBR file
+(Apple M4 Max, both multi-threaded; see below).
 
 To reproduce, point the benchmarks at any other implementation that accepts
 `-z in out`:
@@ -114,8 +114,8 @@ MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run XXX -bench 'Recompress$|R
 
 ## Performance
 
-Repacking an 8-second VBR file, one worker, so that the numbers reflect the
-search itself rather than the core count (Apple M4 Max):
+Repacking an 8-second VBR file, one worker, so the numbers reflect the search
+itself rather than the core count (Apple M4 Max, best of six runs):
 
 | | ms |
 | --- | --- |
@@ -126,12 +126,18 @@ search itself rather than the core count (Apple M4 Max):
 | region search factored by shape | 45.6 |
 | decode from a 64-bit window, no 4.6 kB spectrum copies | 38.4 |
 | batched encoder writes | 36.2 |
+| tail costs batched into one kernel call | 25.1 |
+| bit reader and writer down to one 64-bit access each | 25.1 |
+| eight-bit lookup tables for Huffman decode | 23.1 |
+| count1 costs built only over the range searched | 22.6 |
+| winner comparison hoisted, head costs precomputed | 21.3 |
+| prefix rows stored pre-scaled | 20.5 |
 
-With all cores it is 4.3 ms for the same file. Every step was verified by
-comparing output byte for byte against the previous one, so none of this changed
-a single bit of any result.
+With all cores that file takes 2.5 ms. Every step was verified by comparing
+output byte for byte against the previous one, so none of this changed a single
+bit of any result.
 
-Two of those steps carried the work; the rest were ordinary tuning:
+Three of those steps carried the work; the rest were ordinary tuning.
 
 **Layout.** The search costs a region by subtracting two per-table prefix sums.
 Keeping those sums table-major meant every query strided across 32 separate rows;
@@ -142,36 +148,70 @@ materialising a row per pair.
 
 **Factoring.** The obvious search enumerates every (region0_count, region1_count)
 pair for every big_values: measured at 11,000 inner iterations and 24,000 region
-lookups per granule, against only 2,400 that actually reached the vector kernel.
-But regions 0 and 1 do not move as big_values does. Their best combination is a
+lookups per granule, against only 2,400 that reached the vector kernel. But
+regions 0 and 1 do not move as big_values does. Their best combination is a
 property of the boundary they end at, so it is computed once per boundary and
 reused, leaving only the tail to recompute. Same answers, a third of the work.
 
-A lower bound on each big_values, to skip candidates that cannot win, was tried
-and removed: it prunes almost nothing, because moving a coefficient pair between
-the big-values and count1 regions barely changes the total.
+**Batching.** What remained was one kernel call per region per candidate, and at
+three nanoseconds a call two thirds of that was call overhead. Every span that
+moves with big_values shares its upper endpoint, so they are now computed
+together: one call per candidate that keeps the shared endpoint in registers and
+walks the rows. That alone took 36 ms to 25.
+
+Two things were tried and dropped. A lower bound on each big_values, to skip
+candidates that cannot win, prunes almost nothing — moving a coefficient pair
+between the big-values and count1 regions barely changes the total — and it cost
+5% as a monotone loop break. Rewriting the bit reader and writer around single
+64-bit accesses is clearly faster in isolation but did not move the total; it is
+kept because it is also simpler than the byte-at-a-time version it replaced.
 
 ### Assembly
 
-Two kernels have hand-written arm64 (NEON) and amd64 (SSE2) implementations, with
-portable Go equivalents for everything else:
+Three kernels have hand-written arm64 (NEON) and amd64 (SSE2) implementations,
+with portable Go equivalents for every other architecture:
 
 | | asm | Go | |
 | --- | --- | --- | --- |
-| `accumulate` — add 288 pairs' costs across all 32 tables | 262 ns | 3323 ns | 12.7× |
-| `bestTable` — cheapest of 32 tables for one region | 3.0 ns | 10.9 ns | 3.7× |
+| `accumulate` — add 288 pairs' costs across all 32 tables | 252 ns | 3122 ns | 12.4× |
+| `bestTails` — cheapest table for 22 spans sharing an endpoint | 27 ns | 248 ns | 9.0× |
+| `bestTable` — cheapest of 32 tables for one span | 2.8 ns | 10.1 ns | 3.6× |
 
-Both are 32 lanes wide with no gathers, which is the whole reason they vectorise:
-a pair's cost for every table is one row of a precomputed table, indexed by the
-pair's clamped magnitudes, and the escape penalty is a second row indexed by how
-many linbits it needs. `bestTable` packs each cost above the table index so that
-one unsigned minimum yields both the cost and the winning table, ties included.
-`TestKernelsMatchPortable` compares the assembly against the Go implementations
-on randomised input, so the fallbacks stay honest.
+All three are 32 lanes wide with no gathers, which is the whole reason they
+vectorise: a pair's cost for every table is one row of a precomputed table,
+indexed by the pair's clamped magnitudes, and the escape penalty is a second row
+indexed by how many linbits it needs.
 
-The SSE2 path sticks to the amd64 baseline: `PMINSD` would shorten `bestTable`,
+The cost is packed above the table index so that a single unsigned minimum yields
+both the cost and the winning table, ties included. Prefix rows are therefore
+stored pre-scaled by 32, which leaves the low bits free: subtracting a scaled row
+from a scaled-and-labelled endpoint produces the packed answer directly, with no
+shift per row. `TestKernelsMatchPortable` compares the assembly against the Go
+implementations on randomised input, including rows that make a span
+unrepresentable, so the fallbacks stay honest.
+
+The SSE2 path sticks to the amd64 baseline: `PMINSD` would shorten the reductions,
 but not enough to justify a runtime feature check. It is tested on x86-64 in CI;
 the figures above are arm64.
+
+## The compression ceiling
+
+Within a fixed spectrum and block geometry, the format offers exactly five things
+to re-choose: big_values, both region boundaries, the three code tables and the
+count1 table. The search covers all of them exhaustively, and
+`TestOptimizeMatchesExhaustiveSearch` holds it to a naive implementation, so there
+is nothing left there.
+
+The one degree of freedom this does *not* touch is the scalefactor domain:
+scalefac_compress could be re-chosen for the same values, and scfsi could let the
+second granule inherit the first's. Measured across the test files — 1908 granules
+of LAME output — scalefac_compress is already minimal in every single one, and
+scfsi is already set wherever the values permit it, so both would gain exactly
+zero bits. Scalefactors are only 0.2–10% of the payload to begin with.
+
+A cruder encoder might leave something there, but nothing available here produces
+such files, so implementing it would be untestable speculation. It is written down
+rather than built.
 
 ## Correctness
 

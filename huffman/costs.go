@@ -93,13 +93,35 @@ func accumulateGo(acc *[numTables]int32, keys []uint32) {
 	}
 }
 
-// bestTableGo is the portable implementation of bestTable.
+// bestTailsGo is the portable implementation of bestTails.
+func bestTailsGo(rows []int32, acc *[numTables]int32, out []uint32) {
+	// Scaling and labelling the shared endpoint once is what lets each row cost
+	// one subtraction: (acc<<5 | t) - (row<<5) is (acc-row)<<5 | t, because the
+	// shift leaves the low five bits clear.
+	var scaled [numTables]int32
+	for t, v := range acc {
+		scaled[t] = v<<5 | int32(t)
+	}
+	for i := range out {
+		row := rows[i*numTables:]
+		best := int32(1 << 30)
+		for t := 0; t < numTables; t++ {
+			if k := scaled[t] - row[t]; k < best {
+				best = k
+			}
+		}
+		out[i] = uint32(best)
+	}
+}
+
+// bestTableGo is the portable implementation of bestTable. Both rows arrive
+// pre-scaled by 32, so their difference already leaves room for the table index.
 func bestTableGo(from, to *[numTables]int32) uint32 {
 	best := int32(1 << 30)
 	for t := 0; t < numTables; t++ {
 		// Packing the cost above the table index turns "cheapest table, lowest
 		// index on a tie" into a single minimum.
-		if k := (to[t]-from[t])<<5 | int32(t); k < best {
+		if k := to[t] - from[t] | int32(t); k < best {
 			best = k
 		}
 	}
