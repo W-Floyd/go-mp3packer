@@ -138,8 +138,9 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | tail reduction batched four rows at a time (NEON) | 17.0 |
 | count1 quadruples and pair signs decoded without branching | 16.3 |
 | frame list and per-frame output preallocated, encoder invariants hoisted | 15.1 |
+| peeking the bit window inlined into its callers | 14.9 |
 
-The last five rows were measured in one sitting, in which the row above them came
+The last six rows were measured in one sitting, in which the row above them came
 out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
 relative to each other rather than to the older figures.
 
@@ -225,6 +226,23 @@ the following codeword so that they cannot matter. Whether a table escapes to
 linbits is fixed per region, so instead of testing it per pair the escape trigger
 is set out of range for the tables that have none. Together this cut the decoder's
 own work by about a third and the whole repack by 5% on both architectures.
+
+**What the inliner is really counting.** `Peek64` runs once per coefficient pair
+and was not being inlined; the comment above it blamed the 64-bit load, and that
+was wrong. The load scores 10 against a budget of 80. A probe containing nothing
+but the bounds test and the out-of-line call for the zero-filled tail scores 82: a
+call the inliner cannot see through costs a flat 57, so the `//go:noinline` put on
+the tail path to keep the hot path lean was itself what kept the hot path out of
+line. Letting the tail inline instead does not fit either, at 92, and it would drag
+its loop into the caller. What fits is having no call in the function at all. The
+reader now carries a sixteen-byte zero-padded copy of its own tail, and a peek near
+the end reads from that; every index at or past the end of the data clamps into the
+pad's zero region, so the far tail needs no bounds handling beyond that clamp. The
+whole function becomes a branch and a load, at a cost of 44. `Read` came along
+free, having scored 81 — one point over — and that is thirty-odd calls per frame of
+side info, so the layout-only path dropped another 10% on top of the search's 6%.
+It costs 40 bytes of `Reader`, which is stack-allocated in every hot path, and it
+means a reader has to be built through `NewReader` rather than as a bare literal.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair

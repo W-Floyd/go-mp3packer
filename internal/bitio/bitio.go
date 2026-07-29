@@ -15,40 +15,51 @@ import "encoding/binary"
 type Reader struct {
 	data []byte
 	pos  int // absolute bit position
+
+	// The last bytes of the data, zero-filled to a full word, so that a peek near
+	// the end can be the same load as any other. tailFrom is the byte index pad[0]
+	// stands for and lastWord is the highest index a whole word can be loaded from.
+	lastWord int
+	tailFrom int
+	pad      [16]byte
 }
 
 func NewReader(data []byte) *Reader {
-	return &Reader{data: data}
+	r := &Reader{}
+	r.reset(data)
+	return r
+}
+
+// reset points the reader at data and builds the padded copy of its tail. Kept
+// separate only so that NewReader stays small enough to inline, which is what
+// keeps a Reader on its caller's stack.
+func (r *Reader) reset(data []byte) {
+	r.data = data
+	r.pos = 0
+	r.lastWord = len(data) - 8
+	r.tailFrom = max(len(data)-7, 0)
+	clear(r.pad[:])
+	copy(r.pad[:], data[r.tailFrom:])
 }
 
 // Peek64 returns the next 64 bits without consuming them, most significant bit
 // first, zero-filled past the end of the data. Only the top 57 bits are
 // guaranteed to be present, which is more than the 47 a single MP3 coefficient
 // pair can occupy.
-// The zero-filled tail case is kept out of line so that the hot path is just the
-// aligned load, which the compiler fuses into one load and a byte swap. It is
-// still a call: the inliner scores the pre-optimisation form at 89 against a
-// budget of 80, so it does not quite fit however this is arranged.
+//
+// This is called once per coefficient pair, so it has to inline, and what used to
+// stop it was not the load but the call handling the zero-filled tail: a call the
+// inliner cannot see through costs 57 of its budget of 80. Reading the tail from a
+// padded copy instead leaves the whole function branch-plus-load, at a cost of 44.
+// Every index at or past the end of the data selects the pad's zero region, so
+// clamping is all the bounds checking the far tail needs.
 func (r *Reader) Peek64() uint64 {
 	idx := r.pos >> 3
-	if idx+8 <= len(r.data) {
-		return binary.BigEndian.Uint64(r.data[idx:]) << uint(r.pos&7)
+	b := r.data
+	if idx > r.lastWord {
+		b, idx = r.pad[:], min(idx-r.tailFrom, 7)
 	}
-	return r.peekTail()
-}
-
-//go:noinline
-func (r *Reader) peekTail() uint64 {
-	idx := r.pos >> 3
-	var w uint64
-	for i := 0; i < 8; i++ {
-		var b byte
-		if idx+i < len(r.data) {
-			b = r.data[idx+i]
-		}
-		w = w<<8 | uint64(b)
-	}
-	return w << uint(r.pos&7)
+	return binary.BigEndian.Uint64(b[idx:]) << uint(r.pos&7)
 }
 
 // Read consumes n bits (0 <= n <= 32) and returns them right-aligned.
