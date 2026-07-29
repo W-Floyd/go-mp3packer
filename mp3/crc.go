@@ -4,6 +4,16 @@ package mp3
 // is what lets the whole byte be folded in at once rather than a bit at a time.
 var crcTable [256]uint16
 
+// crcSlice[k][b] is the CRC of byte b followed by k zero bytes, so that four
+// bytes can be folded in by four independent lookups instead of four dependent
+// ones. crcSlice[0] is crcTable.
+//
+// Byte at a time, each step needs the previous step's crc to index the table, so
+// the loop runs at the latency of a load plus a shift and an xor however wide the
+// machine is. Slicing breaks that chain: the four lookups depend only on the
+// state as it was four bytes ago and on the input, so they issue together.
+var crcSlice [4][256]uint16
+
 func init() {
 	for i := range crcTable {
 		crc := uint16(i) << 8
@@ -15,6 +25,14 @@ func init() {
 			}
 		}
 		crcTable[i] = crc
+	}
+	crcSlice[0] = crcTable
+	for k := 1; k < len(crcSlice); k++ {
+		for b := range crcSlice[k] {
+			// Advance the previous row by one zero byte.
+			c := crcSlice[k-1][b]
+			crcSlice[k][b] = c<<8 ^ crcTable[c>>8]
+		}
 	}
 }
 
@@ -28,6 +46,19 @@ func init() {
 func CRC16(chunks ...[]byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, chunk := range chunks {
+		// The register is only sixteen bits wide, so it is fully consumed after
+		// two bytes: the third and fourth bytes of a group index their tables by
+		// themselves, and only the first two are mixed with the state.
+		for len(chunk) >= 4 {
+			// The parentheses are not decoration: | and ^ share a precedence
+			// level in Go, so without them the low byte is or-ed into the state
+			// instead of xor-ed, which is wrong exactly when the state's low
+			// byte is not zero.
+			u := crc ^ (uint16(chunk[0])<<8 | uint16(chunk[1]))
+			crc = crcSlice[3][u>>8] ^ crcSlice[2][u&0xFF] ^
+				crcSlice[1][chunk[2]] ^ crcSlice[0][chunk[3]]
+			chunk = chunk[4:]
+		}
 		for _, b := range chunk {
 			crc = crc<<8 ^ crcTable[byte(crc>>8)^b]
 		}
