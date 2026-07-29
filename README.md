@@ -160,8 +160,7 @@ that way, and came out level once the order rotated.
 
 The table is arm64. Every step since the kernels became architecture-specific has
 been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as well
-as on the file above, and all of them hold there. The last row is arm64 only so
-far:
+as on the file above, and all of them hold there:
 
 | | arm64 | x86-64 |
 | --- | --- | --- |
@@ -169,8 +168,15 @@ far:
 | bits through an accumulator, decode positions in registers | −7.5% | −4.2% |
 | memoised region costs not called per candidate | −1.1% | −1.8% |
 | prefix covers batched, candidates rejected before the call | −3.6% | −5.8% |
-| window-switched geometry in its own loop | −2.0% | not yet |
+| window-switched geometry in its own loop | −2.0% | −0.9% |
 | encoder's accumulator in registers | −4.8% | −5.3% |
+
+These are one worker on the two-and-a-half-minute track. The window-switched row
+is the weakest of them: it wins four of six rotated pairs there, against a clean
+−3.3% on the dense eight-second file, which is the gap between real music and
+material that over-represents the search. It is also the row with least to win —
+only one to four granules in a hundred switch — so a smaller number on real music
+is what it should read, not a disappointment.
 
 The pad is the one worth checking rather than assuming: it doubles a Reader from
 32 bytes to 64, and a 32 kB L1 is less forgiving than a 128 kB one. It pays on
