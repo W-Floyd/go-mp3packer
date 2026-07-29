@@ -101,22 +101,27 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are ahead. Both invoked as commands, on an Apple M4 Max:
+On speed we are ahead. Both invoked as commands on an Apple M4 Max, medians of
+three runs of twenty:
 
-| | `go-mp3packer` | `mp3packercpp` |
-| --- | --- | --- |
-| 8-second VBR, 180 kB | 4.8 ms | 22.4 ms |
-| 2m38s, 192 kbps CBR, 3.8 MB | 24.4 ms | — |
+| | `go-mp3packer` | `mp3packercpp` | |
+| --- | --- | --- | --- |
+| 8-second VBR, 180 kB | 4.7 ms | 23.5 ms | 5.0× |
+| 2m38s, 192 kbps CBR, 3.8 MB | 23.8 ms | 203 ms | 8.5× |
 
 `BenchmarkCLI` and `BenchmarkReference` are the pair, both timing a subprocess
-over a file, so the exec and the disk are in each. To reproduce, and to fill in
-the figure this machine has no binary for:
+over a file, so the exec and the disk are in each:
 
 ```sh
 export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3
-MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run TestReference -v .
-MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run XXX -bench 'CLI|Reference' .
+export MP3PACKER_REFERENCE=/path/to/mp3packercpp
+go test -run TestReferenceCompression -v .
+go test -run XXX -bench 'CLI|Reference' .
 ```
+
+`TestReferenceCompression` is the other half of that: it repacks each test file
+with both and fails if our coded audio is larger. On five of the seven the output
+is the same size to the byte.
 
 For measuring changes to the code rather than comparing implementations, see
 [PERFORMANCE.md](PERFORMANCE.md).

@@ -179,13 +179,16 @@ cannot resolve say so and cite the `ab` that produced them.
   — 1.36 ms against 4.76, of which 2.88 is starting the process. Pairing `Process`
   against `BenchmarkReference` overstated the lead by about 3×. Use
   `BenchmarkCLI`, and prefer `MP3PACKER_BENCH_FILE` over the 8-second file, where
-  fixed costs dominate.
+  fixed costs dominate: we are 5.0× the C++ port on eight seconds and 8.5× on two
+  and a half minutes, and the difference is our own startup being amortised.
 
 ## Tooling
 
+- **`.env`** holds the local machine details — `MP3PACKER_X86_HOST` and
+  `MP3PACKER_REFERENCE`. It is gitignored; `set -a; . ./.env; set +a` to load it.
+  Nothing that identifies a machine belongs in a tracked file.
 - **x86 box:** a Xeon E5-2698 v4, 2.2 GHz locked (no turbo — don't assume 3.6),
-  40 threads, Go 1.26.5, reachable over ssh. Put its host in
-  `$MP3PACKER_X86_HOST` rather than in a file here. Cross-compile and `scp` test
+  40 threads, Go 1.26.5, reachable over ssh at `$MP3PACKER_X86_HOST`. Cross-compile and `scp` test
   binaries; don't sync source. Locally, Rosetta runs amd64 test binaries for
   correctness only.
 - **`-tags mp3timing`** for `Stats.Prepare`/`Recompress`/`Layout` + `Serial()`,

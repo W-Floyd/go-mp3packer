@@ -23,3 +23,12 @@
 # rebuild the whole history. Their names carry the harness and toolchain they were
 # built with, so a stale one is never reused.
 /bench/.build/
+
+# Working area for things checked out to compare against — the C++ port lives here,
+# built, for MP3PACKER_REFERENCE. Nothing in it is ours and none of it is committed.
+/scratch/
+
+# Local machine details: the x86 test host and the path to a reference
+# implementation. Both are specific to one person's setup and one of them is an
+# address, so neither belongs in the repository.
+.env
