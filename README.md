@@ -136,6 +136,7 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | dead two-region candidates never entered | 17.7 |
 | count1 deltas tabulated, region covers hoisted out of the bv loop | 17.1 |
 | tail reduction batched four rows at a time (NEON) | 17.0 |
+| count1 quadruples and pair signs decoded without branching | 16.3 |
 
 The last four rows were measured in one sitting, in which the row above them came
 out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
@@ -187,12 +188,31 @@ copying one per iteration by ranging over values. None of that is on the
 recompression path, but it is most of the layout-only path, which dropped by a
 third, and it cut allocations per repack from 2032 to 676.
 
+**Not branching on the data.** What a decoder branches on is mostly the audio:
+whether a coefficient is zero, and which way its sign points. Neither is
+predictable, so each such branch costs a misprediction about half the time. None
+of them are needed. A sign applies arithmetically — `x^-1 + 1` is `-x`, `x^0 + 0`
+is `x` — and that expression leaves zero alone whichever way the sign bit falls,
+so the only thing that still depends on the value is how far to advance the bit
+window: a shift by the sign count, which a table supplies as 0 or 1. The count1
+quadruples went the same way. Their four values and four signs are now one lookup
+keyed by the symbol and the next four bits, tabulated over the bits that belong to
+the following codeword so that they cannot matter. Whether a table escapes to
+linbits is fixed per region, so instead of testing it per pair the escape trigger
+is set out of range for the tables that have none. Together this cut the decoder's
+own work by about a third and the whole repack by 5% on both architectures.
+
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
 between the big-values and count1 regions barely changes the total — and it cost
 5% as a monotone loop break. Rewriting the bit reader and writer around single
 64-bit accesses is clearly faster in isolation but did not move the total; it is
 kept because it is also simpler than the byte-at-a-time version it replaced.
+
+Narrowing `Spectrum` from `int` to `int32` was tried and reverted. It halves the
+4.6 kB a granule occupies and every copy, clear and compare of it, which looked
+worth having on a 32 kB L1; measured on both an M4 Max and a Xeon E5-2698 v4 it
+was worth nothing at all, and it changes an exported type, so it went back.
 
 ### Assembly
 

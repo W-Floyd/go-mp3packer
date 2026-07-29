@@ -85,6 +85,13 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 			return pos >= end || pos >= NumCoefficients-1
 		}
 		checkLimit := idx != 0
+		// A magnitude of 15 escapes to linbits, but only for tables that have any.
+		// Setting the trigger out of range for the others folds "does this table
+		// escape" into the comparison the loop was making anyway.
+		escape := 15
+		if linbits == 0 {
+			escape = 16
+		}
 		for pos < end && pos < NumCoefficients-1 {
 			if checkLimit && r.Tell() >= limit {
 				return false
@@ -116,30 +123,31 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 				}
 			}
 
-			x, y := sym>>4&0xF, sym&0xF
-			if x > 0 {
-				if x == 15 && linbits > 0 {
-					x += int(w >> (64 - linbits))
-					w <<= linbits
-					used += int(linbits)
-				}
-				if w>>63 != 0 {
-					x = -x
-				}
-				w <<= 1
-				used++
+			// Neither the sign bits nor whether a value is zero can be predicted, so
+			// neither is branched on. Applying a sign is an xor and an add — x^-1+1
+			// is -x, x^0+0 is x — and it is a no-op on zero for either sign bit,
+			// which leaves only the bit advance to depend on the value: a shift by
+			// the sign count, zero or one.
+			d := &pairDecode[sym]
+			x, y := int(d.x), int(d.y)
+			if x == escape {
+				x += int(w >> (64 - linbits))
+				w <<= linbits
+				used += int(linbits)
 			}
-			if y > 0 {
-				if y == 15 && linbits > 0 {
-					y += int(w >> (64 - linbits))
-					w <<= linbits
-					used += int(linbits)
-				}
-				if w>>63 != 0 {
-					y = -y
-				}
-				used++
+			sx := int(w >> 63)
+			x = (x ^ -sx) + sx
+			w <<= uint(d.nx)
+			used += int(d.nx)
+
+			if y == escape {
+				y += int(w >> (64 - linbits))
+				w <<= linbits
+				used += int(linbits)
 			}
+			sy := int(w >> 63)
+			y = (y ^ -sy) + sy
+			used += int(d.ny)
 			dst[pos], dst[pos+1] = x, y
 			pos += 2
 			r.Skip(used)
@@ -169,20 +177,15 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 			}
 			sym, used := e.symbol(), e.length()
 			w <<= uint(used)
-			for bit := 3; bit >= 0; bit-- {
-				val := 0
-				if sym&(1<<uint(bit)) != 0 {
-					val = 1
-					if w>>63 != 0 {
-						val = -1
-					}
-					w <<= 1
-					used++
-				}
-				dst[pos] = val
-				pos++
-			}
-			r.Skip(used)
+			// One lookup covers the pattern and its signs together; the sign bits
+			// sit at the top of w now that the codeword has been shifted off.
+			q := &count1Quad[sym<<4|int(w>>60)]
+			dst[pos] = int(q[0])
+			dst[pos+1] = int(q[1])
+			dst[pos+2] = int(q[2])
+			dst[pos+3] = int(q[3])
+			pos += 4
+			r.Skip(used + int(count1Signs[sym]))
 		}
 	}
 	if r.Tell() > r.Len() {

@@ -40,7 +40,68 @@ var (
 	// maxQuant is the largest absolute coefficient a table can represent, or -1
 	// for the two undefined tables, which must never be selected.
 	maxQuant [34]int
+
+	// count1Quad resolves a whole count1 quadruple in one lookup. The symbol says
+	// which of the four values are non-zero and their sign bits follow in the same
+	// order, so symbol and the next four bits of the stream together determine all
+	// four coefficients. Bits past the symbol's sign count belong to whatever comes
+	// next and must not matter, which is why every combination of them is
+	// tabulated: entries that differ only in those bits are equal. int8 keeps the
+	// whole table inside 1kB, since the values are only -1, 0 and 1.
+	count1Quad [256][4]int8
+
+	// count1Signs is how many sign bits a count1 symbol carries.
+	count1Signs [16]uint8
+
+	// pairDecode splits a big-value symbol into its two magnitudes and how many
+	// sign bits each of them carries. Having the counts to hand lets the decoder
+	// advance the bit window by a shift of zero or one instead of branching on
+	// whether a value is zero, which is not predictable.
+	pairDecode [256]pairSplit
 )
+
+type pairSplit struct {
+	x, y   int8
+	nx, ny uint8
+}
+
+func init() {
+	for sym := 0; sym < 16; sym++ {
+		n := 0
+		for i := 0; i < 4; i++ {
+			if sym&(8>>uint(i)) != 0 {
+				n++
+			}
+		}
+		count1Signs[sym] = uint8(n)
+		for pat := 0; pat < 16; pat++ {
+			var q [4]int8
+			k := 0
+			for i := 0; i < 4; i++ {
+				if sym&(8>>uint(i)) == 0 {
+					continue
+				}
+				q[i] = 1
+				if pat&(8>>uint(k)) != 0 {
+					q[i] = -1
+				}
+				k++
+			}
+			count1Quad[sym<<4|pat] = q
+		}
+	}
+	for sym := range pairDecode {
+		x, y := int8(sym>>4&0xF), int8(sym&0xF)
+		pairDecode[sym] = pairSplit{x: x, y: y, nx: b2u(x != 0), ny: b2u(y != 0)}
+	}
+}
+
+func b2u(v bool) uint8 {
+	if v {
+		return 1
+	}
+	return 0
+}
 
 func init() {
 	for i := range tables {
