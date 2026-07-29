@@ -331,16 +331,23 @@ wrote zeros nobody looked at.
 
 ### Where the cores go
 
-A worker per core gets 10.4× out of sixteen, and it is worth knowing why it is not
+A worker per core gets 9.7× out of sixteen, and it is worth knowing why it is not
 sixteen, because the answer is not in the search at all. Timing the stages of a
-repack of two and a half minutes of music, one worker against sixteen:
+repack of two and a half minutes of music, one worker against sixteen, each the
+median of fifteen runs:
 
 | | −j 1 | −j 16 |
 | --- | --- | --- |
-| parse and build the reservoir view | 1.91 ms | 1.98 ms |
-| recompress | 189.31 | 15.81 |
-| lay the frames back out | 2.48 | 2.06 |
-| **serial share of the total** | **2.3%** | **20.4%** |
+| parse and build the reservoir view | 1.54 ms | 1.69 ms |
+| recompress | 184.05 | 15.82 |
+| lay the frames back out | 1.78 | 1.79 |
+| **serial share of the total** | **1.8%** | **18.0%** |
+
+The ratio has been falling as the parallel stage gets faster: it was 10.4× when
+the search was slower, and every step that only speeds up recompression pushes it
+down. That is not a regression, it is the serial floor becoming a larger share of
+a smaller total, and it is the argument for spending effort on the two stages
+either side of it rather than on the search.
 
 Build with `-tags mp3timing` for those three figures: `Stats` carries them and `-v`
 prints them. They are compiled out by default, because reading the clock four times
@@ -348,9 +355,9 @@ costs about a hundred nanoseconds a file — nothing against a repack, but a
 measurable fraction of the layout-only benchmark, which is one of the benchmarks
 used to judge the layout pass.
 
-The recompression itself scales 12.0× across twelve performance cores and four
+The recompression itself scales 11.6× across twelve performance cores and four
 efficiency ones, which is about what four half-speed cores predict. What caps the
-total is the fifth of the wall clock that never shrinks. That is also why a kernel
+total is the sixth of the wall clock that never shrinks. That is also why a kernel
 win measured on one worker mostly vanishes across all of them — the AVX2 row
 batching is worth 4.6% of one worker and nothing at all of sixteen — and it cuts
 the other way too: the frame CRC below was worth 1% of one worker and a sixth of
@@ -410,7 +417,10 @@ That is 3.27 ms to 3.11 ms on the serial path of the long track, winning all fiv
 interleaved pairs, and 26.9 MB to 19.4 MB of allocation per repack. The
 allocation saved is twice the size of the audio, because the gap padding pushed
 `stream` past the capacity it had been given and it doubled. Across all cores it
-is worth about 0.9%, which does not clear the noise there.
+is worth about 0.9%, which does not clear the noise there. It earns no row in the
+step table above, which is one worker on the eight-second file and cannot see a
+serial change at all; where it shows is the stage table under *Where the cores
+go*, as layout falling from 2.48 ms to 1.78.
 
 Caching `Frame.MainDataBits` was the other half of this item and was dropped.
 Recomputing it — a loop over granules and channels summing `part2_3_length`, from
@@ -457,8 +467,8 @@ is what `Encode` being 18.8% of a worker predicts. The Xeon agrees: 5135 ns to
 This is work that parallelises, so unlike the frame CRC it is worth *less* across
 all cores rather than more, and by different amounts on the two machines: 20.1 ms
 to 19.6 on sixteen, 2.7%, against 51.1 ms to 48.7 on forty, 4.7%. The serial floor
-explains the gap. It is a fifth of the arm64 all-core run and much less of the
-Xeon's, so the same saving in the parallel part is diluted more on the machine
+explains the gap. It is close to a fifth of the arm64 all-core run and much less
+of the Xeon's, so the same saving in the parallel part is diluted more on the machine
 that has less parallel part left. Both were measured as eight interleaved pairs of
 twenty runs, which is the least that separates them: at three pairs the arm64
 figure read 1.9% one way and 3.5% the other depending on whether the runs were
