@@ -148,3 +148,28 @@ func TestReferenceCompression(t *testing.T) {
 		})
 	}
 }
+
+// BenchmarkRecompressFile times a file named by MP3PACKER_BENCH_FILE, so that
+// material longer than the committed corpus can be measured without carrying it
+// in the repository.
+func BenchmarkRecompressFile(b *testing.B) {
+	path := os.Getenv("MP3PACKER_BENCH_FILE")
+	if path == "" {
+		b.Skip("set MP3PACKER_BENCH_FILE to an mp3 to benchmark")
+	}
+	data := read(b, path)
+	for _, workers := range []int{1, 0} {
+		name := "allcores"
+		if workers == 1 {
+			name = "1worker"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				if _, _, err := Process(data, Options{Recompress: true, Workers: workers}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}

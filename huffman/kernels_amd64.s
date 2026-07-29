@@ -444,6 +444,19 @@ tailsloop:
 tailsdone:
 	RET
 
+// TAILROW reduces one row against the accumulator, leaving its 32 lanes folded
+// down to the 8 of dst. Both the load and the subtract are the one instruction,
+// so a row costs four of them and three minimums.
+#define TAILROW(dst) \
+	VPSUBD 0(SI), Y0, Y8   \
+	VPSUBD 32(SI), Y1, Y9  \
+	VPSUBD 64(SI), Y2, Y10 \
+	VPSUBD 96(SI), Y3, Y11 \
+	VPMINUD Y9, Y8, Y8     \
+	VPMINUD Y11, Y10, Y10  \
+	VPMINUD Y10, Y8, dst   \
+	ADDQ $128, SI
+
 // Y0-Y3 keep the scaled and labelled accumulator for the whole run. A row is
 // then four subtracts straight from memory and three minimums, with no loads and
 // no register copies of its own.
@@ -461,15 +474,50 @@ tailsavx2:
 	VPOR 64(BX), Y2, Y2
 	VPOR 96(BX), Y3, Y3
 
-tailsavx2loop:
-	VPSUBD 0(SI), Y0, Y4
-	VPSUBD 32(SI), Y1, Y5
-	VPSUBD 64(SI), Y2, Y6
-	VPSUBD 96(SI), Y3, Y7
+	CMPQ CX, $4
+	JLT  tailsavx2one
 
-	VPMINUD Y5, Y4, Y4
-	VPMINUD Y7, Y6, Y6
-	VPMINUD Y6, Y4, Y4
+// Four rows at a time. A row on its own ends in a six-instruction serial fold
+// and a 4-byte store, which is what the kernel was spending its time on once the
+// subtracts came free. Reducing four rows to four vectors first and then
+// transposing lets one chain finish all four: the unpacks work inside each
+// 128-bit half, so both halves transpose at once and a single cross-half minimum
+// at the end covers all eight lanes of every row.
+tailsavx2four:
+	TAILROW(Y4)
+	TAILROW(Y5)
+	TAILROW(Y6)
+	TAILROW(Y7)
+
+	VPUNPCKLDQ Y5, Y4, Y8
+	VPUNPCKHDQ Y5, Y4, Y9
+	VPUNPCKLDQ Y7, Y6, Y10
+	VPUNPCKHDQ Y7, Y6, Y11
+	VPUNPCKLQDQ Y10, Y8, Y12
+	VPUNPCKHQDQ Y10, Y8, Y13
+	VPUNPCKLQDQ Y11, Y9, Y14
+	VPUNPCKHQDQ Y11, Y9, Y15
+
+	VPMINUD Y13, Y12, Y12
+	VPMINUD Y15, Y14, Y14
+	VPMINUD Y14, Y12, Y12
+
+	// Lane i of each half now belongs to row i; fold the halves together.
+	VEXTRACTI128 $1, Y12, X13
+	VPMINUD X13, X12, X12
+
+	VMOVDQU X12, (DI)
+	ADDQ    $16, DI
+	SUBQ    $4, CX
+	CMPQ    CX, $4
+	JGE     tailsavx2four
+
+	TESTQ CX, CX
+	JZ    tailsavx2done
+
+// The leftover rows, one at a time.
+tailsavx2one:
+	TAILROW(Y4)
 
 	VEXTRACTI128 $1, Y4, X5
 	VPMINUD X5, X4, X4
@@ -480,10 +528,10 @@ tailsavx2loop:
 
 	VMOVD X4, (DI)
 	ADDQ  $4, DI
-	ADDQ  $128, SI
 	DECQ  CX
-	JNZ   tailsavx2loop
+	JNZ   tailsavx2one
 
+tailsavx2done:
 	VZEROUPPER
 	RET
 

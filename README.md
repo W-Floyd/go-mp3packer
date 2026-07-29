@@ -310,17 +310,34 @@ subtracts and seven minimums. `accumulate` gains most, having had no SSE4.1 form
 at all — its eight load-and-add pairs collapse to four adds with memory operands.
 Measured on a Xeon E5-2698 v4 at a locked 2.2 GHz:
 
+The AVX2 `bestTails` also batches four rows and transposes, as the NEON one does.
+Once the subtracts came free that fold was most of what was left: six serial
+instructions and a 4-byte store per row, against 3.5 amortised instructions and a
+quarter of a store. The unpacks work inside each 128-bit half, so both halves
+transpose at once and one cross-half minimum finishes all eight lanes of all four
+rows.
+
 | | SSE2 | SSE4.1 | AVX2 | |
 | --- | --- | --- | --- | --- |
 | `accumulate` | 1004 ns | — | 574 ns | 1.7× |
-| `bestTails` | 255 ns | 116 ns | 84 ns | 3.0× |
+| `bestTails` | 255 ns | 116 ns | 65 ns | 3.9× |
 | `bestTable` | 16.0 ns | 11.7 ns | 8.6 ns | 1.9× |
 
-End to end that is 7% off one worker and 9% off all forty, which is less than the
-kernels suggest for the ordinary reason: they are a quarter of the x86 profile, so
-a third off them is 8% off the total. What stops AVX2 doing better is no longer
-instruction count but the six-instruction serial fold at the end of each row, plus
-four 32-byte loads against two load ports.
+End to end, each step against the one before it on the 8-second file above, one
+worker: SSE4.1 to AVX2 took 66.3 ms to 61.5, and batching the rows took 61.1 to
+58.3. Both are far less than the kernel figures suggest, for the ordinary reason —
+the three kernels are a quarter of that file's x86 profile, so a third off them is
+under a tenth off the total.
+
+That file also flatters them. On two and a half minutes of 192 kbps CBR music,
+`bestTails` is 10% of the profile rather than 19%, and the row batching is worth
+1.8% rather than 4.6%; `Decode` and `Encode` are 22% each, which is where the time
+actually goes on ordinary material. Nothing here is measurable at all across every
+core, where the work is bound by memory rather than by arithmetic. The eight-second
+file is a fair yardstick for the search itself, which is what it was chosen for,
+but it is not a fair guide to what a kernel change is worth in practice — hence
+`BenchmarkRecompressFile`, which takes a path from `MP3PACKER_BENCH_FILE` so a real
+track can be measured without carrying one in the repository.
 
 Detection asks for more than the AVX2 feature bit: the YMM registers are only
 usable if the operating system has enabled saving them, so `OSXSAVE` and `XGETBV`
