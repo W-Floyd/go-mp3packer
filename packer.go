@@ -175,15 +175,21 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 	// Every frame's output is bounded by its input, so the whole per-frame stage
 	// writes into one buffer carved up in advance: a frame's slot is its own and
 	// nothing else touches it, which keeps the stage allocation-free even with a
-	// worker per CPU.
-	slots := make([]int, len(audio)+1)
-	arenaSize := 0
-	for i := range audio {
-		slots[i] = arenaSize
-		arenaSize += audio[i].MainDataBytes() + bitio.Slack
+	// worker per CPU. Nothing writes coded data without the search, though, and a
+	// frame that comes through unchanged is read straight out of the reservoir
+	// view, so with recompression off the arena is not allocated at all.
+	var slots []int
+	var arena []byte
+	if opt.Recompress {
+		slots = make([]int, len(audio)+1)
+		arenaSize := 0
+		for i := range audio {
+			slots[i] = arenaSize
+			arenaSize += audio[i].MainDataBytes() + bitio.Slack
+		}
+		slots[len(audio)] = arenaSize
+		arena = make([]byte, arenaSize)
 	}
-	slots[len(audio)] = arenaSize
-	arena := make([]byte, arenaSize)
 
 	tRecompress := clock()
 	work := recompressAll(audio, pool, starts, arena, slots, opt, &stats)
@@ -225,7 +231,10 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 func recompressAll(frames []mp3.Frame, pool []byte, starts []int, arena []byte, slots []int, opt Options, stats *Stats) []frameWork {
 	work := make([]frameWork, len(frames))
 	run := func(i int) {
-		buf := arena[slots[i]:slots[i]:slots[i+1]]
+		var buf []byte
+		if arena != nil {
+			buf = arena[slots[i]:slots[i]:slots[i+1]]
+		}
 		work[i] = recompressFrame(&frames[i], pool, starts[i], buf, opt)
 	}
 	if !opt.Recompress || opt.workers() <= 1 || len(frames) < 2 {
@@ -265,12 +274,27 @@ func recompressAll(frames []mp3.Frame, pool []byte, starts []int, arena []byte, 
 	return work
 }
 
-// mainData extracts a frame's own audio from the input reservoir into buf,
-// zero-filling any part that lies outside the file.
+// mainData returns a frame's own audio, as bytes taken from the input reservoir
+// and byte-aligned.
+//
+// Almost always the whole span lies inside the reservoir, and then the answer is
+// a view of it rather than a copy: nothing downstream writes to a frame's data,
+// so with recompression off this is the only form needed and buf can be nil.
+// What is left is the two ends of the file — a frame pointing back before its
+// start, and the last frame's rounding tail reaching past it — where the part
+// outside has to be zero-filled into a buffer of its own.
 func mainData(fr *mp3.Frame, pool []byte, start int, buf []byte) []byte {
 	n := fr.MainDataBytes()
-	out := buf[:n]
 	from := start - fr.SideInfo.MainDataBegin
+	if from >= 0 && from+n <= len(pool) {
+		return pool[from : from+n : from+n]
+	}
+	if cap(buf) < n {
+		// Only the handful of edge frames above reach this, so allocating for
+		// them beats sizing the arena for a case that usually never arises.
+		buf = make([]byte, n)
+	}
+	out := buf[:n]
 	// The part of the span that lies inside the reservoir is one copy; the rest
 	// is zeroed rather than tested for per byte, which is what this used to do.
 	// buf may already have been written to by an abandoned recompression, so the
