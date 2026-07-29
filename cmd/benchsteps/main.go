@@ -967,14 +967,30 @@ func render(res results, t table) (string, error) {
 	return b.String(), nil
 }
 
-// deltaCell is the change from the previous row, in per cent, parenthesised when
-// it is inside what the settling target can resolve.
+// worseFactor is how much more evidence an increase needs than a decrease before
+// it is shown as a result.
+//
+// Benchmark noise is one-sided: a run can be delayed by other work on the
+// machine and never hurried by it, so what noise there is pushes a median up.
+// An apparent increase is therefore the direction noise already favours, and
+// wants holding to a higher standard than an apparent decrease of the same size.
+//
+// The asymmetry of the consequences points the same way. Missing a real
+// improvement costs a row that reads flat, and the improvement can be
+// demonstrated elsewhere; publishing a regression that is not there sends the
+// next person hunting something that does not exist, in a commit that is
+// probably fine.
+const worseFactor = 2
+
+// deltaCell is the change from the previous row, in per cent, bracketed when it
+// is inside what the settling target can resolve.
 //
 // Two medians each good to t differ by chance with a standard error near t root
-// two, so about three t is the least that means anything. Printing a bracketed
-// number rather than nothing keeps the direction visible while saying plainly
-// that it is not a result — several of these rows are steps that are real but
-// only measurable elsewhere.
+// two, so about three t is the least a decrease can mean anything at, and
+// worseFactor times that for an increase. Printing a bracketed number rather
+// than nothing keeps the direction visible while saying plainly that it is not a
+// result — several of these rows are steps that are real but only measurable
+// elsewhere.
 func deltaCell(prev, v, tol float64) string {
 	if prev == 0 {
 		return "—"
@@ -982,10 +998,11 @@ func deltaCell(prev, v, tol float64) string {
 	d := 100 * (v - prev) / prev
 	// U+2212, to match the rest of the document rather than a hyphen.
 	txt := strings.Replace(strconv.FormatFloat(d, 'f', 1, 64), "-", "\u2212", 1) + "%"
+	bar := 300 * tol
 	if d > 0 {
-		txt = "+" + txt
+		txt, bar = "+"+txt, bar*worseFactor
 	}
-	if math.Abs(d) < 300*tol {
+	if math.Abs(d) < bar {
 		return "(" + txt + ")"
 	}
 	return txt

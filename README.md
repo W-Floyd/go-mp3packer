@@ -196,7 +196,8 @@ The Δ columns are the change from the row above, and they are the figures to
 quote: a millisecond count means something only beside the others taken with it,
 where a ratio between two rows of one session survives the drift between
 sittings. A Δ in brackets is inside what the settling target can resolve — not a
-result, direction only.
+result, direction only. An increase has to be twice as large as a decrease before
+it comes out of brackets, for which see below.
 
 Read the two columns against each other rather than down. The frame CRC fold is
 the clearest thing here: (−1.9%) on one worker, unresolved, against −16.2% across
@@ -246,6 +247,16 @@ something over half an hour. That was not worth it here, because a row that
 matters can be settled far more cheaply by a direct A/B of two commits with the
 order rotated, and that is what the claims above rest on. The tables are for the
 shape of twenty steps at once; they are not the instrument for judging one.
+
+An *increase* has to clear twice that bar, so about 9% at the target used here.
+Benchmark noise is one-sided — a run can be delayed by other work on the machine
+and never hurried by it — so an apparent slowdown is the direction noise already
+favours and deserves the higher standard. The consequences are lopsided too:
+missing a real improvement leaves a row reading flat, and it can be shown
+elsewhere, whereas publishing a regression that is not there sends the next
+person hunting something that does not exist in a commit that is probably fine.
+No cell in the tables above is affected by this — the largest increase in either
+is 1.6% — so it is a guard on what gets added, not a correction to what is here.
 
 Several adjacent rows here are within noise of each other and a couple read as
 very slightly slower than the row above. That is what an honest table of a long
