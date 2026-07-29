@@ -1,0 +1,5 @@
+/mp3packer
+mp3packer
+*.test
+*.out
+/dist/
