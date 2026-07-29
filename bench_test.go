@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/W-Floyd/go-mp3packer/mp3"
 )
@@ -37,13 +38,116 @@ func BenchmarkRecompressSingleWorker(b *testing.B) {
 	}
 }
 
+// layoutBenchN is how many times the protected corpus file is repeated to make
+// the layout benchmark's input. 16 copies is ~320 KB and ~770 frames, enough
+// that the measurement settles to well under a percent.
+const layoutBenchN = 16
+
+// layoutBenchInput returns the input for BenchmarkLayoutOnly: a CRC-protected
+// stream long enough to measure.
+//
+// Both properties matter. Relaying the main data moves every granule's
+// reservoir offset, so a protected frame's side info changes and its CRC has to
+// be recomputed — on an unprotected file that work does not happen at all, and
+// the benchmark is blind to it. The committed corpus has exactly one protected
+// file and it is 20 KB, small enough that the whole run was ~29 µs and swung
+// ±8%; twice now that noise hid a real change to layout. Repeating its frames
+// gets a realistic length without committing a large file.
+func layoutBenchInput(b testing.TB) []byte {
+	b.Helper()
+	if path := os.Getenv("MP3PACKER_BENCH_FILE"); path != "" {
+		return read(b, path)
+	}
+	data := read(b, "testdata/cbr-crc.mp3")
+	f, err := mp3.Parse(data)
+	if err != nil {
+		b.Fatal(err)
+	}
+	last := f.Frames[len(f.Frames)-1]
+	// Frame bytes only: dropping the junk either side keeps the repeats
+	// contiguous, and starting the repeats at frame 1 leaves a single leading
+	// Xing/Info frame, where a stream with one every 48 frames is not
+	// representative of anything.
+	audio := data[f.Frames[0].Offset : last.Offset+last.Size()]
+	repeat := data[f.Frames[1].Offset : last.Offset+last.Size()]
+	out := make([]byte, 0, len(audio)+(layoutBenchN-1)*len(repeat))
+	out = append(out, audio...)
+	for i := 1; i < layoutBenchN; i++ {
+		out = append(out, repeat...)
+	}
+	return out
+}
+
+// TestLayoutBenchInput pins what BenchmarkLayoutOnly relies on: the repeated
+// stream parses as one continuous run of protected frames, and laying it out is
+// lossless. If a corpus change quietly drops the CRCs the benchmark stops
+// measuring the CRC recomputation and nothing else notices.
+func TestLayoutBenchInput(t *testing.T) {
+	t.Setenv("MP3PACKER_BENCH_FILE", "")
+	data := layoutBenchInput(t)
+	f, err := mp3.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.SyncErrors != 0 {
+		t.Errorf("%d sync errors: the repeats do not join cleanly", f.SyncErrors)
+	}
+	if len(f.Frames) < 500 {
+		t.Errorf("only %d frames: too short to time layout stably", len(f.Frames))
+	}
+	for i, fr := range f.Frames {
+		if !fr.Header.CRC {
+			t.Fatalf("frame %d is not CRC-protected", i)
+		}
+	}
+
+	out, _, err := Process(data, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, after := spectra(t, data), spectra(t, out)
+	if len(before) != len(after) {
+		t.Fatalf("granule count changed: %d -> %d", len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("granule %d changed", i)
+		}
+	}
+	outFile, err := mp3.Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, fr := range outFile.Frames {
+		if !fr.CRCValid() {
+			t.Fatalf("output frame %d has a stale CRC", i)
+		}
+	}
+}
+
+// BenchmarkLayoutOnly times Process with recompression off, which is the whole
+// of the serial path: parse and build the reservoir view, then choose frame
+// sizes and write the stream back out. That is what caps parallel scaling, so
+// timing it as one number is the point — but layout is only about a quarter of
+// it, so a change to layout alone shows up at a quarter of its true size. Build
+// with -tags mp3timing to get the two stages reported separately.
 func BenchmarkLayoutOnly(b *testing.B) {
-	data := read(b, "testdata/vbr-joint.mp3")
+	data := layoutBenchInput(b)
 	b.SetBytes(int64(len(data)))
+	var prepare, layout time.Duration
 	for b.Loop() {
-		if _, _, err := Process(data, Options{}); err != nil {
+		_, stats, err := Process(data, Options{})
+		if err != nil {
 			b.Fatal(err)
 		}
+		if timingEnabled {
+			prepare += stats.Prepare
+			layout += stats.Layout
+		}
+	}
+	if timingEnabled {
+		b.ReportMetric(float64(prepare.Nanoseconds())/float64(b.N), "prepare-ns/op")
+		b.ReportMetric(float64(layout.Nanoseconds())/float64(b.N), "layout-ns/op")
 	}
 }
 

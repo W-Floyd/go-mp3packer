@@ -370,8 +370,20 @@ entirely out of the fifth of the wall clock that was serial.
 
 It is also invisible on most of the test corpus, which is why it survived this
 long: only two of the eight files carry CRCs, and the file the layout benchmark
-uses is not one of them. Real encodes do — the track measured above was downloaded
-rather than made for the tests.
+used was not one of them. Real encodes do — the track measured above was
+downloaded rather than made for the tests.
+
+So the benchmark was rebuilt around that. `BenchmarkLayoutOnly` now runs on the
+one protected corpus file repeated sixteen times, about 320 KB and 770 frames,
+which is both long enough to settle to a couple of percent and protected enough
+to do the CRC work at all. On the old 28 KB unprotected input the CRC fold above
+was unmeasurable; on this one it is 762 µs against 452 µs, a clear 1.7×.
+`TestLayoutBenchInput` pins the two properties the measurement depends on, so a
+corpus change cannot quietly take them away again. Note that the benchmark times
+the whole serial path, and layout is only about a quarter of it — parsing is the
+rest — so build with `-tags mp3timing` for the two stages reported separately.
+Read those for attribution and the total for A/B: the per-call stage clocks are
+much noisier than the wall clock.
 
 **The search that was not one.** A window-switched granule has no split to
 enumerate: the standard fixes where region0 ends, at the ninth long band or the
@@ -403,6 +415,22 @@ candidates, 0.34%, and the 16 kB table it needs made recompression 6% slower.
 Rewriting the bit reader and writer around single
 64-bit accesses is clearly faster in isolation but did not move the total; it is
 kept because it is also simpler than the byte-at-a-time version it replaced.
+
+Giving the encoder's pair loop the treatment that worked on the decoder was tried
+twice and dropped both times. The decode side got 5% from resolving a symbol
+through `pairDecode` and appending signs branchlessly, and the write side looked
+like it had the same shape: `abs`, two clamps and two escape tests before the
+table lookup. Neither is where the time is. Folding the sign counts and the
+linbits width into the codeword entry, so nothing in the loop branches or tests
+for zero, cost 2%: the escapes are rare and perfectly predicted, and the masking
+that replaced them is not free. Folding just the `linbits > 0` half of the escape
+test into an out-of-range sentinel, as `decodeRegion` does, measured flat — the
+compiler was already hoisting it. A profile of `BenchmarkEncodeGranule` says why
+both were beside the point: `Write64` is 51% of `Encode` and `abs` is 0.9%. The
+encoder is bound by the bit writer's accumulator, a read-modify-write of `w.acc`
+and `w.nacc` on the critical path of every pair, which is the same store-to-load
+turnaround the decoder escaped by carrying its bit position in a local. That, not
+the coefficient arithmetic, is what an encode-side change has to attack.
 
 Narrowing `Spectrum` from `int` to `int32` was tried and reverted. It halves the
 4.6 kB a granule occupies and every copy, clear and compare of it, which looked
