@@ -169,3 +169,87 @@ func TestDecodeRejectsTruncatedData(t *testing.T) {
 		t.Error("truncated granule decoded as if valid")
 	}
 }
+
+// benchCorpus is a fixed spread of granules, from near-silence to a dense
+// high-bitrate frame, so that a granule-level benchmark reflects the mix the
+// search really sees. The seed is fixed: these numbers are only useful compared
+// with each other.
+func benchCorpus() []Spectrum {
+	rng := rand.New(rand.NewSource(1))
+	peaks := []int{1, 2, 5, 15, 40, 120, 600}
+	out := make([]Spectrum, 0, 4*len(peaks))
+	for _, peak := range peaks {
+		for i := 0; i < 4; i++ {
+			out = append(out, randomSpectrum(rng, peak))
+		}
+	}
+	return out
+}
+
+// benchCoded is the corpus with each granule's cheapest coding worked out and
+// written, which is what the decoder has to be measured against.
+type benchCoded struct {
+	cfg  Config
+	bits int
+	r    *bitio.Reader
+}
+
+func benchEncoded(tb testing.TB) ([]Spectrum, []benchCoded) {
+	tb.Helper()
+	corpus := benchCorpus()
+	coded := make([]benchCoded, len(corpus))
+	for i := range corpus {
+		cfg, bits := Optimize(&corpus[i], Config{Count1Table: count1Table32}, 44100)
+		if bits < 0 {
+			tb.Fatalf("granule %d has no legal coding", i)
+		}
+		w := bitio.NewWriterSize((bits + 7) / 8)
+		Encode(&corpus[i], cfg, w, 44100)
+		coded[i] = benchCoded{cfg: cfg, bits: bits, r: bitio.NewReader(w.Bytes())}
+	}
+	return corpus, coded
+}
+
+// BenchmarkOptimizeGranule, BenchmarkDecodeGranule and BenchmarkEncodeGranule
+// time the three halves of the work separately. The end-to-end benchmarks cannot
+// attribute a change to one of them without a profile, which makes small steps
+// hard to judge; these can be read directly.
+func BenchmarkOptimizeGranule(b *testing.B) {
+	corpus := benchCorpus()
+	cfg := Config{Count1Table: count1Table32}
+	i := 0
+	for b.Loop() {
+		Optimize(&corpus[i], cfg, 44100)
+		if i++; i == len(corpus) {
+			i = 0
+		}
+	}
+}
+
+func BenchmarkDecodeGranule(b *testing.B) {
+	_, coded := benchEncoded(b)
+	var dst Spectrum
+	i := 0
+	for b.Loop() {
+		c := &coded[i]
+		c.r.Seek(0)
+		if !Decode(&dst, c.cfg, c.r, 44100, c.bits) {
+			b.Fatalf("granule %d failed to decode", i)
+		}
+		if i++; i == len(coded) {
+			i = 0
+		}
+	}
+}
+
+func BenchmarkEncodeGranule(b *testing.B) {
+	corpus, coded := benchEncoded(b)
+	buf := make([]byte, NumCoefficients*8+bitio.Slack)
+	i := 0
+	for b.Loop() {
+		Encode(&corpus[i], coded[i].cfg, bitio.NewWriterBuf(buf), 44100)
+		if i++; i == len(corpus) {
+			i = 0
+		}
+	}
+}

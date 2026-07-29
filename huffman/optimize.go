@@ -48,6 +48,11 @@ type scratch struct {
 	acc  [numTables]int32
 	rows [numRows * numTables]int32
 
+	// The same totals again, unscaled. The batched span kernel scales its shared
+	// endpoint itself, so handing it one of these lets the prefix search reuse it
+	// rather than need a second kernel that takes an already-scaled endpoint.
+	raw [numRows * numTables]int32
+
 	// tails[slot] is the cheapest coding of the span from that boundary up to
 	// big_values, packed as cost<<5|table. These are the only region costs that
 	// move as big_values does, so all of them are recomputed together in a single
@@ -75,8 +80,13 @@ func (sc *scratch) row(slot int) *[numTables]int32 {
 	return (*[numTables]int32)(sc.rows[slot*numTables:])
 }
 
+func (sc *scratch) rawRow(slot int) *[numTables]int32 {
+	return (*[numTables]int32)(sc.raw[slot*numTables:])
+}
+
 func (sc *scratch) snapshot(slot int) {
 	row := sc.rows[slot*numTables : (slot+1)*numTables]
+	copy(sc.raw[slot*numTables:(slot+1)*numTables], sc.acc[:])
 	for i, v := range sc.acc {
 		row[i] = v << 5
 	}
@@ -96,16 +106,26 @@ func (sc *scratch) fillHeads(n int) {
 // Like the head costs, none of it moves with big_values, so each boundary is
 // computed the first time the search can reach it and only read thereafter.
 func (sc *scratch) fillPrefixes(n int) {
+	var spans [8]uint32
 	for ; sc.prefixN < n; sc.prefixN++ {
 		j := sc.prefixN
 		p := &sc.prefix[j]
 		*p = prefixSplit{}
-		for i := max(1, j-8); i <= min(16, j-1); i++ {
+		lo, hi := max(1, j-8), min(16, j-1)
+		if lo > hi {
+			continue
+		}
+		// Every span considered here ends at the same boundary, which is the shape
+		// the batched kernel exists for: one call that keeps the endpoint in
+		// registers and walks the rows, instead of eight calls of which most was
+		// call overhead.
+		bestTails(sc.rows[lo*numTables:(hi+1)*numTables], sc.rawRow(j), spans[:hi-lo+1])
+		for i := lo; i <= hi; i++ {
 			t0, bits0 := int(sc.head[i].table), sc.head[i].bits
 			if bits0 < 0 {
 				continue
 			}
-			t1, bits1 := unpackBest(bestTable(sc.row(i), sc.row(j)))
+			t1, bits1 := unpackBest(spans[i-lo])
 			if bits1 < 0 {
 				continue
 			}
@@ -213,15 +233,14 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 	var bestBV, bestR0, bestR1, bestC1 int
 	var bestTables [3]int
 	bv, c1Table, c1Bits := 0, 0, 0
-	consider := func(bits int32, r0, r1, t0, t1, t2 int) {
-		total := int(bits) + c1Bits
-		if bestBits >= 0 {
-			if total > bestBits {
-				return
-			}
-			if total == bestBits && (bv != bestBV || r0 > bestR0 || (r0 == bestR0 && r1 >= bestR1)) {
-				return
-			}
+	// Most candidates lose outright, and consider cannot inline: it carries the
+	// tie-break and every winner field, and reaching it spills six arguments. So
+	// the losing test is made at the call sites through this, which can inline, and
+	// the call happens only for a candidate that might really win.
+	canWin := func(total int) bool { return bestBits < 0 || total <= bestBits }
+	consider := func(total, r0, r1, t0, t1, t2 int) {
+		if total == bestBits && (bv != bestBV || r0 > bestR0 || (r0 == bestR0 && r1 >= bestR1)) {
+			return
 		}
 		bestBits, bestBV, bestC1 = total, bv, c1Table
 		bestR0, bestR1 = r0, r1
@@ -271,9 +290,13 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			if boundary[slot] >= bv32 {
 				// Region0 already covers every pair there is.
 				if bv == 0 {
-					consider(0, 0, 0, 0, 0, 0)
+					if canWin(c1Bits) {
+						consider(c1Bits, 0, 0, 0, 0, 0)
+					}
 				} else if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
-					consider(bits0, 0, 0, t0, 0, 0)
+					if total := int(bits0) + c1Bits; canWin(total) {
+						consider(total, 0, 0, t0, 0, 0)
+					}
 				}
 				continue
 			}
@@ -291,7 +314,9 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			if bits1 < 0 {
 				continue
 			}
-			consider(bits0+bits1, 0, 0, t0, t1, 0)
+			if total := int(bits0+bits1) + c1Bits; canWin(total) {
+				consider(total, 0, 0, t0, t1, 0)
+			}
 			continue
 		}
 
@@ -308,9 +333,13 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		}
 		if firstAbove >= 0 {
 			if bv == 0 {
-				consider(0, firstAbove-1, 0, 0, 0, 0)
+				if canWin(c1Bits) {
+					consider(c1Bits, firstAbove-1, 0, 0, 0, 0)
+				}
 			} else if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
-				consider(bits0, firstAbove-1, 0, t0, 0, 0)
+				if total := int(bits0) + c1Bits; canWin(total) {
+					consider(total, firstAbove-1, 0, t0, 0, 0)
+				}
 			}
 		}
 		last0 := 16
@@ -336,7 +365,9 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			// the field.
 			r1 := max(0, nTail-i-1)
 			if t1, bits1 := unpackBest(sc.tails[i]); bits1 >= 0 {
-				consider(bits0+bits1, i-1, r1, t0, t1, 0)
+				if total := int(bits0+bits1) + c1Bits; canWin(total) {
+					consider(total, i-1, r1, t0, t1, 0)
+				}
 			}
 		}
 
@@ -355,8 +386,10 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			if bits2 < 0 {
 				continue
 			}
-			i := int(p.region0)
-			consider(p.bits+bits2, i-1, j-i-1, int(p.table0), int(p.table1), t2)
+			if total := int(p.bits+bits2) + c1Bits; canWin(total) {
+				i := int(p.region0)
+				consider(total, i-1, j-i-1, int(p.table0), int(p.table1), t2)
+			}
 		}
 	}
 	if bestBits < 0 {
@@ -377,7 +410,13 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 // quadruple plus the cost four coefficients later, so one backward walk serves
 // every candidate big_values.
 func buildCount1Costs(sc *scratch, s *Spectrum, last, from int) {
-	for pos := NumCoefficients; pos >= from; pos -= 2 {
+	// Only positions up to twice the largest big_values are ever asked about, and
+	// that is at most last+1, so starting at the top of the spectrum writes zeros
+	// for a tail nobody reads — most of the walk on a granule that codes half its
+	// coefficients. Two base-case positions above the recurrence are enough to seed
+	// it, since each step reaches four coefficients up and the walk steps by two.
+	top := min((last+3)&^1, NumCoefficients) // least even position at or above last+2
+	for pos := top; pos >= from; pos -= 2 {
 		switch {
 		case pos >= last:
 			sc.c1Bits32[pos], sc.c1Bits33[pos], sc.c1Usable[pos] = 0, 0, true

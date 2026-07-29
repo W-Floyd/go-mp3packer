@@ -141,10 +141,13 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | peeking the bit window inlined into its callers | 14.9 |
 | bits written through an accumulator, decode positions kept in registers | 14.3 |
 | memoised region costs no longer called once per candidate | 13.6 |
+| prefix covers batched, losing candidates rejected before the call | 13.5 |
 
-The last eight rows were measured in one sitting, in which the row above them came
-out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
-relative to each other rather than to the older figures.
+Each row from `boundary tests` downwards was measured against the row above it in
+the same sitting. Between sittings the same code moves by a few percent — the
+`prefix rows stored pre-scaled` row measured 21.7 rather than 20.5 when it was
+re-run, and `memoised region costs` measured 13.9 — so read these as steps
+relative to their neighbours rather than as one continuous scale.
 
 With all cores that file takes 1.6 ms. Every step was verified by comparing
 output byte for byte against the previous one, so none of this changed a single
@@ -274,6 +277,25 @@ region, which forces it to memory. Passing both through plain functions and
 peeking at an explicit position keeps them in registers, and takes the big-values
 loop from 32% of the profile to 25%. Together the two are worth 4% of a repack on
 x86 and 7% on arm64.
+
+**Batching the other endpoint.** The tail costs were batched long ago because
+every span they cost shares its upper endpoint. The prefix search has exactly the
+same shape and had been missed: for a given boundary it costs up to eight spans
+that all *end* there, one kernel call each, and at three nanoseconds a call most
+of that was getting there. It needs no second kernel, only the totals it already
+had: the batched kernel scales its shared endpoint itself, so keeping an unscaled
+copy of each boundary's row alongside the pre-scaled one lets the prefix search
+hand it straight over. Three kilobytes of scratch for a fifth of the prefix cost.
+
+Two smaller things in the same pass. The routine that keeps the best candidate
+cannot inline — it holds the tie-break and every winner field, and reaching it
+spills six arguments — yet it rejects almost everything handed to it on a single
+comparison; making that comparison at the call sites leaves the call for
+candidates that might actually win. And the count1 tail costs were built from the
+top of the spectrum every granule, though nothing above twice the largest
+big_values is ever read: starting two positions above the last non-zero
+coefficient, which is all the recurrence needs to seed itself, skips a walk that
+wrote zeros nobody looked at.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
@@ -417,6 +439,11 @@ On top of that, `go test ./...`:
 - round-trips every code table, every header bit pattern, and every side
   information block of the test files;
 - verifies that repacking a repacked file changes nothing.
+
+`BenchmarkOptimizeGranule`, `BenchmarkDecodeGranule` and `BenchmarkEncodeGranule`
+time the three halves of the work over a fixed spread of granules. The end-to-end
+benchmarks cannot say which of the three a change moved without a profile, which
+makes a one-percent step hard to judge; these can be read directly.
 
 ## Not implemented
 
