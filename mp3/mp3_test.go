@@ -1,6 +1,7 @@
 package mp3
 
 import (
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -179,5 +180,43 @@ func TestFindInfoTag(t *testing.T) {
 	}
 	if first.MainDataBits() != 0 {
 		t.Errorf("a header frame should carry no audio, got %d bits", first.MainDataBits())
+	}
+}
+
+// crc16Bitwise is the frame CRC written straight from its definition, a bit at a
+// time. CRC16 folds a byte at a time through a table instead; this is what that
+// table is held to.
+func crc16Bitwise(chunks ...[]byte) uint16 {
+	crc := uint16(0xFFFF)
+	for _, chunk := range chunks {
+		for _, b := range chunk {
+			for i := 7; i >= 0; i-- {
+				bit := uint16(b>>uint(i)) & 1
+				if crc>>15 != bit {
+					crc = crc<<1 ^ 0x8005
+				} else {
+					crc <<= 1
+				}
+			}
+		}
+	}
+	return crc
+}
+
+func TestCRC16MatchesBitwise(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	for iter := 0; iter < 2000; iter++ {
+		// Two chunks, because that is how a frame CRC arrives: two header bytes
+		// and then the side info, and the register has to carry across the join.
+		a := make([]byte, rng.Intn(5))
+		b := make([]byte, rng.Intn(40))
+		for _, chunk := range [][]byte{a, b} {
+			for i := range chunk {
+				chunk[i] = byte(rng.Intn(256))
+			}
+		}
+		if got, want := CRC16(a, b), crc16Bitwise(a, b); got != want {
+			t.Fatalf("iteration %d over %d+%d bytes: got %04x, want %04x", iter, len(a), len(b), got, want)
+		}
 	}
 }

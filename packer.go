@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/W-Floyd/go-mp3packer/huffman"
 	"github.com/W-Floyd/go-mp3packer/internal/bitio"
@@ -67,6 +68,27 @@ type Stats struct {
 	SyncErrors   int
 	PayloadBits  int // total part2_3_length in the input
 	NewPayload   int // total part2_3_length in the output
+
+	// Wall time of each stage, zero unless built with -tags mp3timing. Only
+	// Recompress uses more than one goroutine, so Prepare and Layout together
+	// bound what any number of workers can achieve — on a long file they are most
+	// of an all-cores repack, and a change that shows up in only one of the three
+	// is easy to misread without these.
+	Prepare    time.Duration // parsing, and building the reservoir view
+	Recompress time.Duration // the per-frame stage, one goroutine per worker
+	Layout     time.Duration // choosing frame sizes and writing the stream back out
+}
+
+// Serial is the part of a repack that does not shrink with more workers.
+func (s Stats) Serial() time.Duration { return s.Prepare + s.Layout }
+
+// clock reads the wall clock, or returns nothing at all when the stage timings
+// are compiled out, which lets the whole of the recording fold away.
+func clock() time.Time {
+	if timingEnabled {
+		return time.Now()
+	}
+	return time.Time{}
 }
 
 // Saved is the number of bytes the repack removed. It can be negative only if
@@ -92,6 +114,7 @@ type frameWork struct {
 // preserved verbatim. A leading Xing/Info/VBRI header frame is preserved too,
 // with its stream size, seek table and checksum updated to match the new layout.
 func Process(data []byte, opt Options) ([]byte, Stats, error) {
+	tPrepare := clock()
 	file, err := mp3.Parse(data)
 	if err != nil {
 		return nil, Stats{}, err
@@ -158,7 +181,9 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 	slots[len(audio)] = arenaSize
 	arena := make([]byte, arenaSize)
 
+	tRecompress := clock()
 	work := recompressAll(audio, pool, starts, arena, slots, opt, &stats)
+	tLayout := clock()
 	for i := range work {
 		stats.NewPayload += work[i].newBits
 	}
@@ -180,6 +205,14 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 	}
 	out = append(out, file.EndJunk...)
 
+	if timingEnabled {
+		// Four reads for the whole repack, taken at the stage boundaries, so the
+		// three durations are differences rather than six separate readings.
+		tDone := clock()
+		stats.Prepare = tRecompress.Sub(tPrepare)
+		stats.Recompress = tLayout.Sub(tRecompress)
+		stats.Layout = tDone.Sub(tLayout)
+	}
 	stats.OutputSize = len(out)
 	return out, stats, nil
 }

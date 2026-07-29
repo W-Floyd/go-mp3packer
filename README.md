@@ -317,24 +317,30 @@ wrote zeros nobody looked at.
 
 ### Where the cores go
 
-A worker per core gets 8.4× out of sixteen, and it is worth knowing why, because
-the answer is not in the search at all. Timing the stages of a repack of two and a
-half minutes of music, one worker against sixteen:
+A worker per core gets 10.4× out of sixteen, and it is worth knowing why it is not
+sixteen, because the answer is not in the search at all. Timing the stages of a
+repack of two and a half minutes of music, one worker against sixteen:
 
 | | −j 1 | −j 16 |
 | --- | --- | --- |
-| parse | 1.14 ms | 1.10 ms |
-| build the reservoir view | 0.39 | 0.40 |
-| recompress | 187.33 | 16.01 |
-| lay the frames back out | 5.91 | 5.57 |
-| **serial share of the total** | **3.8%** | **30.6%** |
+| parse and build the reservoir view | 1.91 ms | 1.98 ms |
+| recompress | 189.31 | 15.81 |
+| lay the frames back out | 2.48 | 2.06 |
+| **serial share of the total** | **2.3%** | **20.4%** |
 
-The recompression itself scales 11.7× across twelve performance cores and four
+Build with `-tags mp3timing` for those three figures: `Stats` carries them and `-v`
+prints them. They are compiled out by default, because reading the clock four times
+costs about a hundred nanoseconds a file — nothing against a repack, but a
+measurable fraction of the layout-only benchmark, which is one of the benchmarks
+used to judge the layout pass.
+
+The recompression itself scales 12.0× across twelve performance cores and four
 efficiency ones, which is about what four half-speed cores predict. What caps the
-total is the third of the wall clock that never shrinks: laying out the frames is
-serial, and at sixteen workers it is a quarter of the run on its own. That is also
-why a kernel win measured on one worker mostly vanishes across all of them — the
-AVX2 row batching is worth 4.6% of one worker and nothing at all of sixteen.
+total is the fifth of the wall clock that never shrinks. That is also why a kernel
+win measured on one worker mostly vanishes across all of them — the AVX2 row
+batching is worth 4.6% of one worker and nothing at all of sixteen — and it cuts
+the other way too: the frame CRC below was worth 1% of one worker and a sixth of
+the run on sixteen.
 
 Three likelier-sounding explanations are not the cause. Garbage collection is not:
 the collector runs eight or nine times whatever the worker count, pausing about
@@ -349,6 +355,20 @@ serial stages, which is a symptom of the same thing.
 So the lever on parallel throughput is the layout pass, not the coder:
 `BenchmarkRecompressWorkers` measures the curve, and `BenchmarkLayoutOnly` measures
 the thing that bounds it.
+
+**The serial stage was mostly a CRC.** A protected frame stores a checksum over its
+side information, and rewriting the side info means recomputing it. Written from
+the definition that is eight branches a bit, about thirty bytes a frame, and on a
+CRC-protected file it was 40% of the layout pass — the largest single cost in the
+one stage that no number of workers can share. Folding a byte at a time through a
+256-entry table takes the layout of a two-and-a-half-minute track from 5.6 ms to
+2.1 ms. On one worker that is worth 1%; across sixteen it is 17%, because it comes
+entirely out of the fifth of the wall clock that was serial.
+
+It is also invisible on most of the test corpus, which is why it survived this
+long: only two of the eight files carry CRCs, and the file the layout benchmark
+uses is not one of them. Real encodes do — the track measured above was downloaded
+rather than made for the tests.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair

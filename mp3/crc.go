@@ -1,19 +1,35 @@
 package mp3
 
+// crcTable[b] is the frame CRC of the single byte b from a zero register, which
+// is what lets the whole byte be folded in at once rather than a bit at a time.
+var crcTable [256]uint16
+
+func init() {
+	for i := range crcTable {
+		crc := uint16(i) << 8
+		for bit := 0; bit < 8; bit++ {
+			if crc&0x8000 != 0 {
+				crc = crc<<1 ^ 0x8005
+			} else {
+				crc <<= 1
+			}
+		}
+		crcTable[i] = crc
+	}
+}
+
 // CRC16 computes the MPEG audio frame CRC: generator polynomial 0x8005
 // (x^16 + x^15 + x^2 + 1), initial value 0xFFFF, MSB first, no final xor.
+//
+// A protected frame's CRC covers its side info, so this runs over about thirty
+// bytes per frame — bit at a time that was the single largest cost of laying a
+// file back out, and the layout pass is serial, so it bounded what every worker
+// could add up to. TestCRC16MatchesBitwise holds the table to the definition.
 func CRC16(chunks ...[]byte) uint16 {
 	crc := uint16(0xFFFF)
 	for _, chunk := range chunks {
 		for _, b := range chunk {
-			for i := 7; i >= 0; i-- {
-				bit := uint16(b>>uint(i)) & 1
-				if crc>>15 != bit {
-					crc = crc<<1 ^ 0x8005
-				} else {
-					crc <<= 1
-				}
-			}
+			crc = crc<<8 ^ crcTable[byte(crc>>8)^b]
 		}
 	}
 	return crc

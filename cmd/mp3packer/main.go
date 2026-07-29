@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	mp3packer "github.com/W-Floyd/go-mp3packer"
 )
@@ -92,6 +93,13 @@ func main() {
 			fmt.Printf(", %d sync errors", stats.SyncErrors)
 		}
 		fmt.Println()
+		if *verbose && stats.Serial() > 0 {
+			// Zero unless built with -tags mp3timing. Only the recompression stage
+			// is parallel, so the other two are what stop more workers helping.
+			fmt.Printf("  prepare %v, recompress %v, layout %v (%v serial)\n",
+				stats.Prepare.Round(time.Microsecond), stats.Recompress.Round(time.Microsecond),
+				stats.Layout.Round(time.Microsecond), stats.Serial().Round(time.Microsecond))
+		}
 	}
 }
 
