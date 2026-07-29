@@ -101,8 +101,8 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are ahead, though by less than this used to claim. Repacking the
-8-second VBR file on an Apple M4 Max, both multi-threaded:
+On speed we are ahead. Repacking the 8-second VBR file on an Apple M4 Max, both
+multi-threaded:
 
 | | ms |
 | --- | --- |
@@ -112,12 +112,12 @@ On speed we are ahead, though by less than this used to claim. Repacking the
 | of which: starting the process | 2.88 |
 
 The figure to compare is the third. `BenchmarkReference` execs another
-implementation, so it pays for a process start and for touching the disk, and the
-1.6 ms this section used to quote against it was `Process` — no file, no exec. Like
-for like against the 22.4 ms recorded for the C++ port, 4.76 ms is about 4.7×, not
-the fourteen the old pairing implied.
+implementation, so it pays for a process start and for touching the disk, and
+`BenchmarkCLI` is the only one of ours that pays the same. Against the 22.4 ms
+recorded for the C++ port, that is about 4.7×. Comparing `Process` with it instead
+flatters us by an exec and two file operations.
 
-Worth seeing rather than hiding: on a file this small our own startup is 2.88 ms,
+Note what the decomposition says: on a file this small our own startup is 2.88 ms,
 more than the repack it exists to perform. Go's runtime is a poor fit for a tool
 invoked once per file, and anyone repacking a library one call at a time is paying
 that per file. It does not show on the two-and-a-half-minute track, where it is a
@@ -177,10 +177,9 @@ itself rather than the core count:
 | frame data read from the reservoir in place | 13.7 | ≈ |
 <!-- /benchsteps:steps-short -->
 
-One row per commit, which is as fine as the history goes. An earlier
-hand-written version of this table had steps within commits — the first release
-was squashed from several — and those states do not exist to be checked out;
-`git log -p README.md` still has the numbers as they were recorded at the time.
+One row per commit, which is as fine as the history goes: the first release was
+squashed from several steps, and those states cannot be checked out to be
+measured.
 
 Eight seconds is 309 frames, so this table cannot see a serial change at all:
 everything parsing and layout do scales with the frame count. The same steps on
@@ -219,8 +218,7 @@ The Δ columns are the change from the row above, and they are the figures to
 quote: a millisecond count means something only beside the others taken with it,
 where a ratio between two rows of one session survives the drift between
 sittings. A Δ of ≈ means the measurement cannot support a direction, so none is
-given. The bar is the same in both directions; it was briefly twice as high for
-an increase, and that is explained and disowned below.
+given. The bar is the same in both directions, for the reason set out below.
 
 Read the two columns against each other rather than down. The frame CRC fold is
 the clearest thing here: −1.9% on one worker against −18.3% across sixteen, as
@@ -290,37 +288,41 @@ Every figure is a median taken until its own standard error fell under a target,
 interleaved in a rotating order, with each individual run recorded in
 `bench/results.json`. The provenance line above gives the target actually used.
 
-Work out what that target buys before reading anything into a small step. Two
-medians each good to *t* differ by chance with a standard error of about *t*√2, so
-a decrease needs roughly 3*t* — a little over two sigma — before it means
-anything. At the 0.5% these were taken at that is **about 1.5%**. Cells short of
-it read ≈ rather than a number, so the tables state their own limits instead of
-leaving them to be worked out.
+Work out what that target buys before reading anything into a small step. A step
+is the ratio of two medians, so its own standard error is theirs added in
+quadrature, and it is printed only past twice that. Two medians each good to *t*
+give a step good to about *t*√2, which puts the bar near 3*t* — **about 1.5%** at
+the 0.5% these were taken at. Cells short of it read ≈, so the tables state their
+own limits instead of leaving them to be worked out.
+
+Each step is pooled over every session that measured both of its ends, weighted by
+how well each measured, which is why a cell's bar is its own rather than a figure
+read off the target. A time can only be compared with the others taken beside it,
+this machine drifting about 7% between sittings; a ratio within one session divides
+that out, so sessions accumulate.
 
 That target is not free. The runs needed go as its inverse square, and the
 all-cores column is much the noisier of the two, so where a quiet single-worker
 cell settles in the minimum five runs its all-cores neighbour can want a hundred:
-875 runs over 109 passes for this table, against 100 over six at 1.5%. Loosening
-to 1.5% left thirteen of nineteen steps unresolved, which was not worth the time
-saved.
+1463 runs over 244 passes for these tables. A target of 1.5% needs a sixth of
+that and resolves six of the nineteen steps rather than most of them, which is the
+trade being made.
 
 Even so, a row that matters is settled far more cheaply by a direct A/B of two
 commits with the order rotated. These tables are for the shape of twenty steps at
 once; they are not the instrument for judging one.
 
-An *increase* has to clear twice that bar — about 3% here, or a little over four
-sigma. Benchmark noise is one-sided, since a run can be delayed by other work on
-the machine and never hurried by it, so an apparent slowdown is the direction
-noise already favours and deserves the higher standard. The consequences are
-lopsided the same way: missing a real improvement leaves a row reading ≈, and it
-can be shown elsewhere, whereas printing a regression that is not there sends the
-next person hunting something that does not exist in a commit that is probably
-fine.
+An increase clears the same bar as a decrease, and is printed on the same terms.
+Read one more sceptically all the same: benchmark noise is one-sided, a run being
+delayed by other work on the machine and never hurried by it, so an apparent
+slowdown is the direction noise favours. That is a reason to check a printed
+increase against what the change could plausibly cost, not a reason to hold it to
+a higher threshold — a regression nobody is shown is one nobody fixes.
 
-Which is why an unresolved cell prints ≈ and not the number in brackets, as it
-first did. A bracket is not enough — "(+1.1%)" is read as a slight worsening by
-anyone skimming, and there is no evidence for a worsening at all. If a direction
-cannot be supported, none is offered.
+An unresolved cell prints ≈ rather than its measured number in brackets. A bracket
+is not enough: "(+1.1%)" reads as a slight worsening to anyone skimming the column,
+and there is no evidence for a worsening. If a direction cannot be supported, none
+is offered.
 
 Several adjacent rows here are within noise of each other and a couple read as
 very slightly slower than the row above. That is what an honest table of a long
