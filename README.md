@@ -101,27 +101,58 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are ahead. Both invoked as commands on an Apple M4 Max, medians of
-three runs of twenty:
+On speed we are ahead where it counts. Every test file, both invoked as commands
+with every core available, on an Apple M4 Max:
 
-| | `go-mp3packer` | `mp3packercpp` | |
+<!-- comparison:comparison-files -->
+| file | size | ours | reference | |
+| --- | --- | --- | --- | --- |
+| bench-vbr.mp3 | 180 kB | 4.62 ms | 23.3 ms | 5.0× |
+| cbr-crc.mp3 | 20 kB | 3.67 ms | 6.87 ms | 1.9× |
+| cbr320-quiet.mp3 | 322 kB | 4.72 ms | 8.49 ms | 1.8× |
+| cbr320-stereo.mp3 | 50 kB | 3.48 ms | 3.35 ms | 1.0× |
+| lsf-22050.mp3 | 15 kB | 3.42 ms | 2.59 ms | 0.8× |
+| vbr-joint.mp3 | 28 kB | 3.59 ms | 6.04 ms | 1.7× |
+| vbr-mono.mp3 | 10 kB | 3.73 ms | 5.12 ms | 1.4× |
+| bards-tale.mp3 | 3810 kB | 24.3 ms | 199 ms | 8.2× |
+<!-- /comparison:comparison-files -->
+
+Two things in there are worth reading rather than skipping. The ratio collapses as
+the files get smaller, and on the two smallest it goes the other way: below about
+50 kB both sides are mostly paying to start a process, and ours costs 2.9 ms of
+that. On `lsf-22050.mp3` the reference is quicker for a different reason — it
+declines to recompress MPEG-2 at all, so it is not doing the same job.
+
+Across worker counts, on the longest file to hand:
+
+<!-- comparison:comparison-threads -->
+| threads | ours | reference | |
 | --- | --- | --- | --- |
-| 8-second VBR, 180 kB | 4.7 ms | 23.5 ms | 5.0× |
-| 2m38s, 192 kbps CBR, 3.8 MB | 23.8 ms | 203 ms | 8.5× |
+| 1 | 195 ms | 2224 ms | 11.4× |
+| 2 | 104 ms | 1155 ms | 11.1× |
+| 4 | 56.8 ms | 594 ms | 10.5× |
+| all | 24.3 ms | 199 ms | 8.2× |
+<!-- /comparison:comparison-threads -->
 
-`BenchmarkCLI` and `BenchmarkReference` are the pair, both timing a subprocess
-over a file, so the exec and the disk are in each:
+Our lead is largest on one worker and narrows as cores are added, because the
+reference scales better than we do: 11.2× from one thread to sixteen against our
+8.0×. A fifth of our wall clock is parsing and laying frames back out, and no
+number of workers can share it — see [PERFORMANCE.md](PERFORMANCE.md).
+
+`TestComparison` produces both tables and asserts what they claim, which is
+narrowly that we are faster on the longest file at every worker count. It times
+each side the same way, as a subprocess over a file, so the exec and the disk are
+in every figure:
 
 ```sh
-export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3
 export MP3PACKER_REFERENCE=/path/to/mp3packercpp
-go test -run TestReferenceCompression -v .
-go test -run XXX -bench 'CLI|Reference' .
+export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3   # optional
+go test -run TestComparison -update-comparison .
 ```
 
-`TestReferenceCompression` is the other half of that: it repacks each test file
-with both and fails if our coded audio is larger. On five of the seven the output
-is the same size to the byte.
+`TestReferenceCompression` is the other half: it repacks each file with both and
+fails if our coded audio is larger. On five of the seven the output is the same
+size to the byte.
 
 For measuring changes to the code rather than comparing implementations, see
 [PERFORMANCE.md](PERFORMANCE.md).

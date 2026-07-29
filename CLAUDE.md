@@ -179,8 +179,13 @@ cannot resolve say so and cite the `ab` that produced them.
   — 1.36 ms against 4.76, of which 2.88 is starting the process. Pairing `Process`
   against `BenchmarkReference` overstated the lead by about 3×. Use
   `BenchmarkCLI`, and prefer `MP3PACKER_BENCH_FILE` over the 8-second file, where
-  fixed costs dominate: we are 5.0× the C++ port on eight seconds and 8.5× on two
-  and a half minutes, and the difference is our own startup being amortised.
+  fixed costs dominate. `TestComparison` generates the README's tables and asserts
+  the claim; `-update-comparison` rewrites them. Two results from it to keep in
+  mind: **below about 50 kB we are level with or slower than the C++ port**,
+  because 2.9 ms of startup outweighs the work, and **our lead narrows as cores
+  are added** — 11.4× on one thread against 8.2× on sixteen, the reference scaling
+  11.2× where we manage 8.0×. Adding cores is not where the remaining win is; the
+  serial floor is.
 
 ## Tooling
 
