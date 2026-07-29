@@ -149,6 +149,24 @@ the same sitting. Between sittings the same code moves by a few percent — the
 re-run, and `memoised region costs` measured 13.9 — so read these as steps
 relative to their neighbours rather than as one continuous scale.
 
+The table is arm64. Every step since the kernels became architecture-specific has
+been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as well
+as on the file above, and all of them hold there:
+
+| | arm64 | x86-64 |
+| --- | --- | --- |
+| tail of the bit window read from a pad | −3.4% | −2.0% |
+| bits through an accumulator, decode positions in registers | −7.5% | −4.2% |
+| memoised region costs not called per candidate | −1.1% | −1.8% |
+| prefix covers batched, candidates rejected before the call | −3.6% | −5.8% |
+
+The pad is the one worth checking rather than assuming: it doubles a Reader from
+32 bytes to 64, and a 32 kB L1 is less forgiving than a 128 kB one. It pays on
+both anyway, because a Reader lives on its caller's stack and there is one per
+frame, not one per granule — so the cost is a second cache line on a hot frame,
+not traffic. The two calls it removes per symbol are worth more than that
+everywhere, though noticeably more on the wider core.
+
 With all cores that file takes 1.6 ms. Every step was verified by comparing
 output byte for byte against the previous one, so none of this changed a single
 bit of any result.
