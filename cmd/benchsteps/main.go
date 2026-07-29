@@ -272,7 +272,7 @@ func runCmd(args []string) error {
 	outPath := fs.String("out", "bench/results.json", "measurements, read as a cache and written back")
 	minRounds := fs.Int("min-rounds", 5, "runs to take before judging a cell settled")
 	maxRounds := fs.Int("max-rounds", 250, "runs after which a cell is left unsettled; 0 for no limit")
-	tol := fs.Float64("tolerance", 0.0075, "settled when the median's standard error is under this fraction of it")
+	tol := fs.Float64("tolerance", 0.005, "settled when the median's standard error is under this fraction of it")
 	force := fs.Bool("force", false, "discard cached runs and measure from scratch")
 	sweep := fs.Bool("sweep", false, "measure every cell in this session, which is what inject requires")
 	adopt := fs.Bool("adopt", false, "accept a cache that carries no fingerprint as this machine's")
