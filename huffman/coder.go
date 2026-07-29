@@ -204,61 +204,67 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 // coefficient, which is guaranteed for the Config returned by Optimize.
 func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 	pos := 0
-	// A pair's code, escape magnitudes and signs come to at most 47 bits, so they
-	// are assembled in a register and handed over in one call.
-	writePair := func(x, y, idx int) {
-		if idx == 0 {
-			return
-		}
-		linbits := tables[idx].linbits
-		ax, ay := abs(x), abs(y)
-		sx, sy := min(ax, 15), min(ay, 15)
-		c := encodeTables[idx][sx<<4|sy]
-		word, n := uint64(c.bits), c.length
-		if sx == 15 && linbits > 0 {
-			word = word<<uint(linbits) | uint64(ax-15)
-			n += linbits
-		}
-		if ax != 0 {
-			word = word<<1 | uint64(signBit(x))
-			n++
-		}
-		if sy == 15 && linbits > 0 {
-			word = word<<uint(linbits) | uint64(ay-15)
-			n += linbits
-		}
-		if ay != 0 {
-			word = word<<1 | uint64(signBit(y))
-			n++
-		}
-		w.Write64(word, n)
-	}
-
 	r0, r1, r2 := cfg.regionPairs(sampleRate)
-	for _, reg := range [][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}} {
-		for i := 0; i < reg[0]; i++ {
-			writePair(s[pos], s[pos+1], reg[1])
+	regions := [3][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}}
+	for _, reg := range regions {
+		pairs, idx := reg[0], reg[1]
+		if idx == 0 {
+			pos += 2 * pairs // table 0 codes nothing
+			continue
+		}
+		// Everything that depends only on the table is settled per region: the
+		// per-pair loop then touches one code entry and nothing else global.
+		linbits := tables[idx].linbits
+		tab := &encodeTables[idx]
+		for i := 0; i < pairs; i++ {
+			// A pair's code, escape magnitudes and signs come to at most 47 bits,
+			// so they are assembled in a register and handed over in one call.
+			x, y := s[pos], s[pos+1]
+			ax, ay := abs(x), abs(y)
+			sx, sy := min(ax, 15), min(ay, 15)
+			c := tab[sx<<4|sy]
+			word, n := uint64(c.bits), c.length
+			if sx == 15 && linbits > 0 {
+				word = word<<uint(linbits) | uint64(ax-15)
+				n += linbits
+			}
+			// Whether a coefficient is zero is not predictable, so its sign bit is
+			// appended by shifting the word by zero or one instead of branching:
+			// masking the bit by the same count leaves the word untouched when
+			// there is no sign to write.
+			nx := uint(b2u(ax != 0))
+			word = word<<nx | uint64(x)>>63&uint64(nx)
+			n += int(nx)
+			if sy == 15 && linbits > 0 {
+				word = word<<uint(linbits) | uint64(ay-15)
+				n += linbits
+			}
+			ny := uint(b2u(ay != 0))
+			word = word<<ny | uint64(y)>>63&uint64(ny)
+			n += int(ny)
+			w.Write64(word, n)
 			pos += 2
 		}
 	}
 
 	last := lastNonZero(s)
+	tab := &encodeTables[cfg.Count1Table]
 	for pos <= NumCoefficients-4 && pos < last {
+		// The quadruple's symbol and its sign bits are built in the same pass, both
+		// branch-free: a zero coefficient contributes no symbol bit and shifts the
+		// word by nothing.
+		q := s[pos : pos+4 : pos+4]
 		sym := 0
-		for i := 0; i < 4; i++ {
-			if s[pos+i] != 0 {
-				sym |= 1 << uint(3-i)
-			}
+		var signs uint64
+		var ns uint
+		for i, v := range q {
+			nz := uint(b2u(v != 0))
+			sym |= int(nz) << uint(3-i)
+			signs = signs<<nz | uint64(v)>>63&uint64(nz)
+			ns += nz
 		}
-		c := encodeTables[cfg.Count1Table][sym]
-		word, n := uint64(c.bits), c.length
-		for i := 0; i < 4; i++ {
-			if v := s[pos+i]; v != 0 {
-				word = word<<1 | uint64(signBit(v))
-				n++
-			}
-		}
-		w.Write64(word, n)
+		c := tab[sym]
+		w.Write64(uint64(c.bits)<<ns|signs, c.length+int(ns))
 		pos += 4
 	}
 }

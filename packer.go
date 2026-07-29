@@ -145,7 +145,20 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 		}
 	}
 
-	work := recompressAll(audio, pool, starts, opt, &stats)
+	// Every frame's output is bounded by its input, so the whole per-frame stage
+	// writes into one buffer carved up in advance: a frame's slot is its own and
+	// nothing else touches it, which keeps the stage allocation-free even with a
+	// worker per CPU.
+	slots := make([]int, len(audio)+1)
+	arenaSize := 0
+	for i := range audio {
+		slots[i] = arenaSize
+		arenaSize += audio[i].MainDataBytes() + bitio.Slack
+	}
+	slots[len(audio)] = arenaSize
+	arena := make([]byte, arenaSize)
+
+	work := recompressAll(audio, pool, starts, arena, slots, opt, &stats)
 	for i := range work {
 		stats.NewPayload += work[i].newBits
 	}
@@ -172,10 +185,11 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 }
 
 // recompressAll runs the per-frame stage, in parallel when asked to.
-func recompressAll(frames []mp3.Frame, pool []byte, starts []int, opt Options, stats *Stats) []frameWork {
+func recompressAll(frames []mp3.Frame, pool []byte, starts []int, arena []byte, slots []int, opt Options, stats *Stats) []frameWork {
 	work := make([]frameWork, len(frames))
 	run := func(i int) {
-		work[i] = recompressFrame(&frames[i], pool, starts[i], opt)
+		buf := arena[slots[i]:slots[i]:slots[i+1]]
+		work[i] = recompressFrame(&frames[i], pool, starts[i], buf, opt)
 	}
 	if !opt.Recompress || opt.workers() <= 1 || len(frames) < 2 {
 		for i := range frames {
@@ -214,27 +228,34 @@ func recompressAll(frames []mp3.Frame, pool []byte, starts []int, opt Options, s
 	return work
 }
 
-// mainData extracts a frame's own audio from the input reservoir, zero-filling
-// any part that lies before the start of the file.
-func mainData(fr *mp3.Frame, pool []byte, start int) []byte {
+// mainData extracts a frame's own audio from the input reservoir into buf,
+// zero-filling any part that lies outside the file.
+func mainData(fr *mp3.Frame, pool []byte, start int, buf []byte) []byte {
 	n := fr.MainDataBytes()
-	out := make([]byte, n)
+	out := buf[:n]
 	from := start - fr.SideInfo.MainDataBegin
-	for i := 0; i < n; i++ {
-		if p := from + i; p >= 0 && p < len(pool) {
-			out[i] = pool[p]
-		}
+	// The part of the span that lies inside the reservoir is one copy; the rest
+	// is zeroed rather than tested for per byte, which is what this used to do.
+	// buf may already have been written to by an abandoned recompression, so the
+	// zeroing is not something the caller can be trusted to have done.
+	lo, hi := max(from, 0), min(from+n, len(pool))
+	if lo >= hi {
+		clear(out)
+		return out
 	}
+	clear(out[:lo-from])
+	copy(out[lo-from:], pool[lo:hi])
+	clear(out[hi-from:])
 	return out
 }
 
 // recompressFrame re-codes one frame's granules. On any difficulty it falls back
 // to copying the frame's data through unchanged, which is always safe: the
 // repack still gains from the new layout.
-func recompressFrame(fr *mp3.Frame, pool []byte, start int, opt Options) frameWork {
+func recompressFrame(fr *mp3.Frame, pool []byte, start int, buf []byte, opt Options) frameWork {
 	verbatim := func(abandoned bool) frameWork {
 		return frameWork{
-			data:      mainData(fr, pool, start),
+			data:      mainData(fr, pool, start, buf),
 			side:      fr.SideInfo,
 			abandoned: abandoned,
 			newBits:   fr.MainDataBits(),
@@ -254,8 +275,9 @@ func recompressFrame(fr *mp3.Frame, pool []byte, start int, opt Options) frameWo
 	r := bitio.NewReader(pool)
 	r.Seek(from * 8)
 	// The result is only kept if it is smaller than the input, so the frame's
-	// current size is a hard upper bound on what the writer will need.
-	w := bitio.NewWriterSize(fr.MainDataBytes())
+	// current size is a hard upper bound on what the writer will need, and buf
+	// was reserved with exactly that in mind.
+	w := bitio.NewWriterBuf(buf)
 	side := fr.SideInfo
 	// One spectrum for decoding and one for the verification pass, reused across
 	// the frame's granules: they are 4.6kB each, too big to keep copying.

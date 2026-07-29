@@ -135,14 +135,20 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 	// Coefficients above 1 in magnitude cannot live in the count1 region, so
 	// they set a floor on big_values; nothing above the last non-zero
 	// coefficient needs coding at all, which sets the ceiling.
+	//
+	// The two bounds share their walk: no pair above the last non-zero
+	// coefficient can hold a magnitude over 1, so the floor's scan starts where
+	// the ceiling's ended rather than at the top of the spectrum. Granules
+	// usually code well under half their coefficients, so that tail is the
+	// larger part of both scans.
+	last := lastNonZero(s)
 	lastBig := 0
-	for pair := MaxBigValues - 1; pair >= 0; pair-- {
+	for pair := (last - 1) / 2; pair >= 0; pair-- {
 		if abs(s[2*pair]) > 1 || abs(s[2*pair+1]) > 1 {
 			lastBig = pair + 1
 			break
 		}
 	}
-	last := lastNonZero(s)
 	maxBV := min(max((last+1)/2, lastBig), MaxBigValues)
 
 	for p := 0; p < maxBV; p++ {

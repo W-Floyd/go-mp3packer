@@ -106,6 +106,17 @@ func Parse(data []byte) (*File, error) {
 	}
 	f.StartJunk = data[:start]
 
+	// A Frame is over a kilobyte, so growing the slice by append alone copies
+	// megabytes for a file of any length. Every frame in a stream shares a
+	// sample rate and hence a duration, so the first frame's size is a good
+	// estimate of the rest: exact for CBR, and for VBR close enough that the
+	// slice grows once rather than a dozen times.
+	if h, ok := ParseHeader(data[start:]); ok {
+		if size := h.FrameSize(); size > 0 {
+			f.Frames = make([]Frame, 0, (len(data)-start)/size+1)
+		}
+	}
+
 	pos := start
 	for pos < len(data) {
 		h, ok := ParseHeader(data[pos:])

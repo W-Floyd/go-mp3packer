@@ -77,12 +77,25 @@ type Writer struct {
 
 const writerSlack = 8
 
+// Slack is how much capacity past its output a Writer needs, so that a caller
+// providing its own buffer to NewWriterBuf can size it exactly.
+const Slack = writerSlack
+
 func NewWriter() *Writer { return &Writer{} }
 
 // NewWriterSize returns a Writer with room for n bytes already reserved, which
 // avoids regrowing the buffer when the eventual size is known in advance.
 func NewWriterSize(n int) *Writer {
 	return &Writer{buf: make([]byte, 0, n+writerSlack)}
+}
+
+// NewWriterBuf returns a Writer that builds its output in buf, which must be
+// empty and zeroed: fields are merged in with a read-modify-write, so anything
+// already there would show up in the output. A buffer of n+Slack bytes holds an
+// n-byte result; a Writer given less simply allocates when it runs out, so the
+// capacity is a hint rather than a limit.
+func NewWriterBuf(buf []byte) *Writer {
+	return &Writer{buf: buf[:0]}
 }
 
 // Write appends the low n bits of v (0 <= n <= 32), most significant first.

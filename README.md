@@ -101,7 +101,7 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are well ahead: 2.0 ms versus 22.4 ms to repack an 8-second VBR file
+On speed we are well ahead: 1.6 ms versus 22.4 ms to repack an 8-second VBR file
 (Apple M4 Max, both multi-threaded; see below).
 
 To reproduce, point the benchmarks at any other implementation that accepts
@@ -137,12 +137,13 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | count1 deltas tabulated, region covers hoisted out of the bv loop | 17.1 |
 | tail reduction batched four rows at a time (NEON) | 17.0 |
 | count1 quadruples and pair signs decoded without branching | 16.3 |
+| frame list and per-frame output preallocated, encoder invariants hoisted | 15.1 |
 
-The last four rows were measured in one sitting, in which the row above them came
+The last five rows were measured in one sitting, in which the row above them came
 out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
 relative to each other rather than to the older figures.
 
-With all cores that file takes 2.0 ms. Every step was verified by comparing
+With all cores that file takes 1.6 ms. Every step was verified by comparing
 output byte for byte against the previous one, so none of this changed a single
 bit of any result.
 
@@ -188,6 +189,29 @@ copying one per iteration by ranging over values. None of that is on the
 recompression path, but it is most of the layout-only path, which dropped by a
 third, and it cut allocations per repack from 2032 to 676.
 
+What was left of it was sized wrong rather than unnecessary. The parser grew its
+frame list from nil, and a `Frame` is over a kilobyte, so a file of any length
+spent hundreds of kilobytes being copied forward; every frame in a stream shares a
+sample rate and hence a duration, so the first frame's size predicts the rest,
+exactly for CBR and closely enough for VBR that the slice grows once. The
+per-frame stage allocated a buffer per frame, but each frame's output is bounded
+by its input, so the sizes are all known before any of it runs: it now writes into
+disjoint slots of one buffer, which is also what makes it allocation-free with a
+worker per CPU. Together with copying a frame's reservoir span in one `copy`
+instead of a bounds-checked loop per byte, that is 707 allocations per repack down
+to 310, the layout-only path down 19%, and — because the workers are no longer
+competing with the collector — 7% to 15% off recompression across the test files,
+more than the 4% it saves on a single worker.
+
+Two things in the encoder were paying per pair for facts that hold per region: the
+table's linbits, the address of its code table, and whether the region codes
+anything at all were re-read for every pair, when a region has one table by
+definition. The sign bits went the way the decoder's already had — appended by
+shifting the word by zero or one rather than branching on data that cannot be
+predicted — and the search's two backward bounds scans were fused, since no pair
+above the last non-zero coefficient can hold a magnitude over 1, so the second
+scan can start where the first one ended instead of at the top of the spectrum.
+
 **Not branching on the data.** What a decoder branches on is mostly the audio:
 whether a coefficient is zero, and which way its sign points. Neither is
 predictable, so each such branch costs a misprediction about half the time. None
@@ -205,7 +229,13 @@ own work by about a third and the whole repack by 5% on both architectures.
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
 between the big-values and count1 regions barely changes the total — and it cost
-5% as a monotone loop break. Rewriting the bit reader and writer around single
+5% as a monotone loop break. It was tried a second time in its tightest honest
+form, the exact cheapest coding of each pair with every pair free to choose its
+own table, tabulated over the twelve key bits and summed as a prefix so that a
+candidate could be dismissed before a single region was costed. A bound that loose
+cannot compete with what three regions actually achieve: it fired on 707 of 206,885
+candidates, 0.34%, and the 16 kB table it needs made recompression 6% slower.
+Rewriting the bit reader and writer around single
 64-bit accesses is clearly faster in isolation but did not move the total; it is
 kept because it is also simpler than the byte-at-a-time version it replaced.
 
