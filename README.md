@@ -315,6 +315,41 @@ big_values is ever read: starting two positions above the last non-zero
 coefficient, which is all the recurrence needs to seed itself, skips a walk that
 wrote zeros nobody looked at.
 
+### Where the cores go
+
+A worker per core gets 8.4× out of sixteen, and it is worth knowing why, because
+the answer is not in the search at all. Timing the stages of a repack of two and a
+half minutes of music, one worker against sixteen:
+
+| | −j 1 | −j 16 |
+| --- | --- | --- |
+| parse | 1.14 ms | 1.10 ms |
+| build the reservoir view | 0.39 | 0.40 |
+| recompress | 187.33 | 16.01 |
+| lay the frames back out | 5.91 | 5.57 |
+| **serial share of the total** | **3.8%** | **30.6%** |
+
+The recompression itself scales 11.7× across twelve performance cores and four
+efficiency ones, which is about what four half-speed cores predict. What caps the
+total is the third of the wall clock that never shrinks: laying out the frames is
+serial, and at sixteen workers it is a quarter of the run on its own. That is also
+why a kernel win measured on one worker mostly vanishes across all of them — the
+AVX2 row batching is worth 4.6% of one worker and nothing at all of sixteen.
+
+Three likelier-sounding explanations are not the cause. Garbage collection is not:
+the collector runs eight or nine times whatever the worker count, pausing about
+35 µs, and forcing `GOGC=off` leaves the curve unchanged. Memory bandwidth is not:
+the eight-second file, with a twentieth of the data, scales better rather than
+worse. Nor is it the tail of uneven frames, since six thousand frames across
+sixteen workers leaves nothing much to straggle. The runtime lock contention and
+idle spinning that show up in a parallel profile — `findRunnable` taking
+`sched.lock`, then `osyield` — are fifteen processors with nothing to do during the
+serial stages, which is a symptom of the same thing.
+
+So the lever on parallel throughput is the layout pass, not the coder:
+`BenchmarkRecompressWorkers` measures the curve, and `BenchmarkLayoutOnly` measures
+the thing that bounds it.
+
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
 between the big-values and count1 regions barely changes the total — and it cost

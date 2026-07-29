@@ -1,6 +1,7 @@
 package mp3packer
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,6 +163,33 @@ func BenchmarkRecompressFile(b *testing.B) {
 		name := "allcores"
 		if workers == 1 {
 			name = "1worker"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				if _, _, err := Process(data, Options{Recompress: true, Workers: workers}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkRecompressWorkers times one file across a range of worker counts, so
+// that parallel scaling is measurable without a separate harness. Parsing and
+// laying the frames back out do not shrink with workers, and on a long file they
+// are most of the all-cores wall clock, so the curve flattens well before the
+// core count — read it against BenchmarkLayoutOnly rather than expecting linear.
+func BenchmarkRecompressWorkers(b *testing.B) {
+	path := os.Getenv("MP3PACKER_BENCH_FILE")
+	if path == "" {
+		path = "testdata/bench-vbr.mp3"
+	}
+	data := read(b, path)
+	for _, workers := range []int{1, 2, 4, 8, 12, 0} {
+		name := fmt.Sprintf("j%d", workers)
+		if workers == 0 {
+			name = "jall"
 		}
 		b.Run(name, func(b *testing.B) {
 			b.SetBytes(int64(len(data)))
