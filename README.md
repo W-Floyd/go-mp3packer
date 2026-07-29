@@ -158,9 +158,36 @@ again gives whichever binary always goes last a systematic penalty on a machine
 that is warming up — the encoder row first read as a 1.3% *regression* measured
 that way, and came out level once the order rotated.
 
-The table is arm64. Every step since the kernels became architecture-specific has
-been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as well
-as on the file above, and all of them hold there:
+That table cannot see a serial change at all: eight seconds is 309 frames, and
+everything parsing and layout do scales with the frame count. The recent steps on
+two and a half minutes of real music, 6071 frames, measured in one sitting in
+rotating order — medians of six runs across all cores and five on one worker:
+
+| | −j 1 | −j 16 |
+| --- | --- | --- |
+| before the frame CRC was folded | 203.7 ms | 23.25 ms |
+| frame CRC folded a byte at a time | 201.7 | 19.03 |
+| window-switched geometry in its own loop | 199.7 | 18.87 |
+| encoder's accumulator held in registers | 191.7 | 18.22 |
+| reservoir described rather than built | 192.4 | 18.25 |
+| side info written into the frame | 192.3 | 18.07 |
+
+Read the two columns against each other rather than down: they disagree about
+every row, and that disagreement is the whole point. The CRC fold is worth 1% on
+one worker and 18% across sixteen, because it comes entirely out of the part no
+number of workers can share. The encoder step is the other way round, 4.0%
+against 3.4%, being work that parallelises. And the two allocation steps at the
+bottom are honest about their own size: the reservoir row reads as nothing at
+all here, and its −5% on the serial-path benchmark simply does not survive
+contact with a measurement that has the search in it.
+
+This table needs `bards-tale.mp3`, which is not in the repository — set
+`MP3PACKER_BENCH_FILE` to any few minutes of real encoded music to reproduce its
+shape, though not its numbers.
+
+Both tables are arm64. Every step since the kernels became architecture-specific
+has been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as
+well as on the eight-second file, and all of them hold there:
 
 | | arm64 | x86-64 |
 | --- | --- | --- |
