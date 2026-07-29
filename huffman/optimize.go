@@ -247,6 +247,69 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 		bestTables = [3]int{t0, t1, t2}
 	}
 
+	// A window-switched granule's geometry is not ours to choose: region0 ends at
+	// one fixed boundary, the ninth long band or the third short band across all
+	// three windows, and there is no third region. That is a different search
+	// rather than a special case of this one — two spans to cost, no split to
+	// enumerate — so it gets its own loop. Sharing one loop costs the long-block
+	// path a test and a page of unrelated code between it and the candidate
+	// enumeration, which measured as 3%.
+	if orig.WindowSwitching {
+		slot := 8
+		if orig.BlockType == 2 {
+			slot = shortSlot
+		}
+		// The span below the boundary does not move with big_values, so it is
+		// settled the first time a candidate reaches past the boundary at all.
+		headBits, headTable, headKnown := int32(0), 0, false
+		for bv = lastBig; bv <= maxBV; bv++ {
+			var ok bool
+			c1Table, c1Bits, ok = count1Cost(sc, bv)
+			if !ok {
+				continue
+			}
+			advance(bv)
+
+			if boundary[slot] >= int32(bv) {
+				// Region0 already covers every pair there is.
+				if bv == 0 {
+					if canWin(c1Bits) {
+						consider(c1Bits, 0, 0, 0, 0, 0)
+					}
+					continue
+				}
+				bestTails(sc.rows[:numTables], &sc.acc, sc.tails[:1])
+				if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
+					if total := int(bits0) + c1Bits; canWin(total) {
+						consider(total, 0, 0, t0, 0, 0)
+					}
+				}
+				continue
+			}
+			if !headKnown {
+				// Both rows are snapshots, so this is the cost fillHeads would have
+				// arrived at, for the one boundary that can be asked about.
+				headTable, headBits = unpackBest(bestTable(sc.row(0), sc.row(slot)))
+				headKnown = true
+			}
+			if headBits < 0 {
+				continue
+			}
+			// Only the span up to big_values moves, and there is one of it. The
+			// batched kernel is still what computes it, as a batch of one: it is the
+			// form that takes an unscaled endpoint.
+			bestTails(sc.rows[slot*numTables:(slot+1)*numTables], &sc.acc, sc.tails[slot:slot+1])
+			t1, bits1 := unpackBest(sc.tails[slot])
+			if bits1 < 0 {
+				continue
+			}
+			if total := int(headBits+bits1) + c1Bits; canWin(total) {
+				consider(total, 0, 0, headTable, t1, 0)
+			}
+		}
+		return winner(orig, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
+	}
+
 	// nTail is how many band boundaries lie strictly below big_values. Because
 	// boundary is sorted, it is the only thing the candidate enumeration needs to
 	// know about bv: "boundary[i] >= bv" is exactly "i >= nTail". Every test below
@@ -278,46 +341,6 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			if sc.headN < nTail {
 				sc.fillHeads(nTail)
 			}
-		}
-
-		if orig.WindowSwitching {
-			// Only region0's boundary and two tables are ours to choose; the
-			// geometry comes from the block type.
-			slot := 8
-			if orig.BlockType == 2 {
-				slot = shortSlot
-			}
-			if boundary[slot] >= bv32 {
-				// Region0 already covers every pair there is.
-				if bv == 0 {
-					if canWin(c1Bits) {
-						consider(c1Bits, 0, 0, 0, 0, 0)
-					}
-				} else if t0, bits0 := unpackBest(sc.tails[0]); bits0 >= 0 {
-					if total := int(bits0) + c1Bits; canWin(total) {
-						consider(total, 0, 0, t0, 0, 0)
-					}
-				}
-				continue
-			}
-			sc.fillHeads(slot + 1)
-			t0, bits0 := int(sc.head[slot].table), sc.head[slot].bits
-			if bits0 < 0 {
-				continue
-			}
-			// The short-block boundary has no place in the band ordering, so its
-			// tail is not part of the batch; run it as a batch of one.
-			if slot >= nTail {
-				bestTails(sc.rows[slot*numTables:(slot+1)*numTables], &sc.acc, sc.tails[slot:slot+1])
-			}
-			t1, bits1 := unpackBest(sc.tails[slot])
-			if bits1 < 0 {
-				continue
-			}
-			if total := int(bits0+bits1) + c1Bits; canWin(total) {
-				consider(total, 0, 0, t0, t1, 0)
-			}
-			continue
 		}
 
 		// Every remaining candidate is a split of the pairs [0, big_values) into
@@ -392,17 +415,24 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			}
 		}
 	}
-	if bestBits < 0 {
+	return winner(orig, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
+}
+
+// winner assembles the configuration the search settled on. Both searches end
+// this way, and neither runs it more than once, so it is a function rather than
+// repeated at each exit.
+func winner(orig Config, bits, bv, c1Table int, tables [3]int, r0, r1 int) (Config, int) {
+	if bits < 0 {
 		return orig, -1
 	}
 	best := orig
-	best.BigValues = bestBV
-	best.TableSelect = bestTables
-	best.Count1Table = bestC1
+	best.BigValues = bv
+	best.TableSelect = tables
+	best.Count1Table = c1Table
 	if !orig.WindowSwitching {
-		best.Region0Count, best.Region1Count = bestR0, bestR1
+		best.Region0Count, best.Region1Count = r0, r1
 	}
-	return best, bestBits
+	return best, bits
 }
 
 // buildCount1Costs fills in the cost of coding the spectrum tail as count1

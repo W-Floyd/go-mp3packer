@@ -253,3 +253,29 @@ func BenchmarkEncodeGranule(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkOptimizeGranuleSwitched is the same search over window-switched
+// geometry, which takes its own path: the standard fixes where region0 ends, so
+// there are two spans to cost rather than a split to enumerate. The benchmark
+// above never enters it, and a short block's boundary is not even one of the band
+// boundaries the long-block path works in.
+func BenchmarkOptimizeGranuleSwitched(b *testing.B) {
+	for _, geom := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"short", Config{Count1Table: count1Table32, WindowSwitching: true, BlockType: 2}},
+		{"start", Config{Count1Table: count1Table32, WindowSwitching: true, BlockType: 1}},
+	} {
+		b.Run(geom.name, func(b *testing.B) {
+			corpus := benchCorpus()
+			i := 0
+			for b.Loop() {
+				Optimize(&corpus[i], geom.cfg, 44100)
+				if i++; i == len(corpus) {
+					i = 0
+				}
+			}
+		})
+	}
+}

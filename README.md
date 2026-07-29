@@ -142,6 +142,7 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | bits written through an accumulator, decode positions kept in registers | 14.3 |
 | memoised region costs no longer called once per candidate | 13.6 |
 | prefix covers batched, losing candidates rejected before the call | 13.5 |
+| window-switched geometry searched in its own loop | 13.0 |
 
 Each row from `boundary tests` downwards was measured against the row above it in
 the same sitting. Between sittings the same code moves by a few percent — the
@@ -151,7 +152,8 @@ relative to their neighbours rather than as one continuous scale.
 
 The table is arm64. Every step since the kernels became architecture-specific has
 been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as well
-as on the file above, and all of them hold there:
+as on the file above, and all of them hold there. The last row is arm64 only so
+far:
 
 | | arm64 | x86-64 |
 | --- | --- | --- |
@@ -159,6 +161,7 @@ as on the file above, and all of them hold there:
 | bits through an accumulator, decode positions in registers | −7.5% | −4.2% |
 | memoised region costs not called per candidate | −1.1% | −1.8% |
 | prefix covers batched, candidates rejected before the call | −3.6% | −5.8% |
+| window-switched geometry in its own loop | −2.0% | not yet |
 
 The pad is the one worth checking rather than assuming: it doubles a Reader from
 32 bytes to 64, and a 32 kB L1 is less forgiving than a 128 kB one. It pays on
@@ -369,6 +372,24 @@ It is also invisible on most of the test corpus, which is why it survived this
 long: only two of the eight files carry CRCs, and the file the layout benchmark
 uses is not one of them. Real encodes do — the track measured above was downloaded
 rather than made for the tests.
+
+**The search that was not one.** A window-switched granule has no split to
+enumerate: the standard fixes where region0 ends, at the ninth long band or the
+third short band across all three windows, and there is no third region. Two spans
+and no choice of geometry. It had been sharing the long-block loop anyway, which
+batches every band boundary's span before looking at any of them, so each
+candidate costed up to two dozen spans in order to read one — and for a short
+block, whose boundary is not one of the band boundaries at all, the span it needed
+was not even in the batch, so a second call fetched it separately. Giving that
+geometry its own loop, asking for the one span that moves and settling the one that
+does not on first use, more than halves the search for those granules.
+
+Sharing the loop was costing something in the other direction too: with both cases
+in it, the long-block path carried a test and a page of unrelated code between the
+loop head and its own candidate enumeration, worth 3% until the two were separated.
+The gain end to end is larger than the 1% to 4% of granules that switch, because
+under the old arrangement those were the most expensive granules in the file rather
+than the cheapest.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
