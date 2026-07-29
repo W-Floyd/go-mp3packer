@@ -1,7 +1,7 @@
 // Command benchsteps measures the performance history of this repository and
-// writes the result into the README.
+// writes the result into PERFORMANCE.md.
 //
-// The numbers in the README's step tables used to be transcribed by hand, one
+// The numbers in the step tables used to be transcribed by hand, one
 // row per sitting, which made them awkward in three ways: a row could only be
 // compared with its immediate neighbour, re-measuring one row meant editing
 // prose, and a step invisible on the benchmark a table used could be recorded as
@@ -9,7 +9,7 @@
 // checkout of its own commit and regenerates the tables from the result.
 //
 //	benchsteps run     # top up bench/results.json until the medians settle
-//	benchsteps inject  # rewrite the README's tables from that file
+//	benchsteps inject  # rewrite PERFORMANCE.md's tables from that file
 //
 // Each step is built from a detached worktree of its own commit with one extra
 // file added — the harness below — so that every commit is measured by the same
@@ -1212,7 +1212,7 @@ func injectCmd(args []string) error {
 	fs := flag.NewFlagSet("inject", flag.ExitOnError)
 	cfgPath := fs.String("config", "bench/steps.json", "step list, which decides what is shown and in what order")
 	resPath := fs.String("results", "bench/results.json", "measurements")
-	readme := fs.String("readme", "README.md", "file to rewrite")
+	readme := fs.String("into", "PERFORMANCE.md", "file whose marked blocks are rewritten")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

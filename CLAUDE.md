@@ -1,9 +1,9 @@
 # go-mp3packer — working notes
 
 Hard-won context for anyone (human or agent) changing this code. Remaining work
-lives in [TODO.md](TODO.md); the README's Performance section carries the
-measured history, the cross-arch table, the scaling decomposition, and a
-tried-and-dropped list.
+lives in [TODO.md](TODO.md); [PERFORMANCE.md](PERFORMANCE.md) carries the measured
+history, the cross-architecture table, the scaling decomposition, the assembly and
+a tried-and-dropped list.
 
 ## Verification protocol — please pass this on
 
@@ -38,12 +38,31 @@ wrong without it:
 `FuzzProcess` covers the three option combinations, seeded from `testdata/`.
 Crashers are committed under `testdata/fuzz/` and run in the ordinary suite.
 
-Three of the target's original assertions were wrong rather than the code, and
-telling those apart from real faults was most of the work — read the README's
-Correctness section before adding assertions. In particular: **never assert that
-a re-parse of the output agrees with the parse of the input.** Parsing is a
-search, junk and payload can both hold plausible headers, and the repack changes
-which reading wins. Assert against the *bytes*.
+What it found on its first run was in the parser. `findSync` would only lock onto
+a run of fewer than three frames within 64 bytes of the end of the data, but a
+frame is 26 bytes at the bottom of MPEG-2 and 1440 at the top of MPEG-1, so a lone
+frame bigger than that window could not be found at all — and layout grows a frame
+whose payload needs the room. A 27-byte frame declaring 3442 bits came back out as
+a perfectly good 470-byte one our own parser then rejected. Candidates are now
+scored: a longer chain wins, one that fits the data beats one that overruns it, and
+between two that fit, the one leaving less of the file unexplained wins.
+
+Three of the target's own assertions were wrong rather than the code, and telling
+those apart from faults was most of the work. Before adding assertions:
+
+- **Never assert that a re-parse of the output agrees with the parse of the
+  input.** Parsing is a search; junk and payload can both hold plausible headers,
+  and the repack changes which reading wins by changing what follows. Assert
+  against the *bytes*, and carve the frame region out by the lengths the input
+  parse gave you.
+- A leading Xing/Info frame is copied byte for byte, so `-no-crc` does not reach
+  it and it keeps whatever CRC it arrived with.
+- A codeword is read whole once it has started, so one straddling
+  `part2_3_length` pulls in the bytes after the granule — ancillary data, which a
+  repack is free to drop, and does. Comparing decoded spectra has to stop at the
+  declared length, or two files that decode to the same audio compare as
+  different. `decodeSpectra` reports a granule that needs those bytes, and our own
+  output is held to never being one.
 
 ## How to A/B a change
 
@@ -88,9 +107,8 @@ serial         2.799 ->     2.501 ms  -10.66% ±0.73  −10.7%
 ```
 
 `≈` in the last column means the measurement cannot support a direction — see
-*Reading these tables* in the README for what the thresholds are and why an
-increase needs twice the evidence of a decrease. These runs are stored and are
-pooled into the README's step tables, so a pair measured here is a pair `inject`
+*Reading these tables* in PERFORMANCE.md for what the thresholds are. These runs are stored and are
+pooled into the step tables in PERFORMANCE.md, so a pair measured here is one `inject`
 can draw on.
 
 **Then put it in the history.** Add the commit to `bench/steps.json`, then
@@ -164,17 +182,18 @@ cannot resolve say so and cite the `ab` that produced them.
 
 ## Tooling
 
-- **x86 box:** `192.168.1.2`, Xeon E5-2698 v4, 2.2 GHz locked (no turbo — don't
-  assume 3.6), 40 threads, Go 1.26.5. Cross-compile and `scp` test binaries;
-  don't sync source. Locally, Rosetta runs amd64 test binaries for correctness
-  only.
+- **x86 box:** a Xeon E5-2698 v4, 2.2 GHz locked (no turbo — don't assume 3.6),
+  40 threads, Go 1.26.5, reachable over ssh. Put its host in
+  `$MP3PACKER_X86_HOST` rather than in a file here. Cross-compile and `scp` test
+  binaries; don't sync source. Locally, Rosetta runs amd64 test binaries for
+  correctness only.
 - **`-tags mp3timing`** for `Stats.Prepare`/`Recompress`/`Layout` + `Serial()`,
   printed by `-v`. Compiled out by default (verified zero-cost).
 - **Attribution:** `BenchmarkOptimizeGranule` / `DecodeGranule` /
   `EncodeGranule` for the three halves, `BenchmarkRecompressWorkers` for the `-j`
   curve, `MP3PACKER_BENCH_FILE=bards-tale.mp3` for long material. `benchstat` is
   at `$(go env GOPATH)/bin/benchstat`.
-- **`cmd/benchsteps` owns the README's step tables**, and `ab` is how a single
+- **`cmd/benchsteps` owns the step tables in PERFORMANCE.md**, and `ab` is how a single
   change is measured — see *How to A/B a change* above. Do not hand-edit the
   tables; add a commit to `bench/steps.json`, `run -sweep`, then `inject`. Runs are cached in
   `bench/results.json` and only unsettled cells are re-measured, so adding one
