@@ -279,6 +279,16 @@ of times per file. Moving the test to the call site — only a candidate that
 reached a new band boundary has anything to add — is worth 5% of the repack for
 two lines.
 
+None of that accounting is something the language promises. The budget of 80 and
+the 57 a call costs are internals of `cmd/compile`, free to move in any release,
+and if they move the reader quietly goes back to calling per symbol with every
+test still green. `TestHotPathsStillInline` asks the compiler directly, by
+building the package with `-gcflags=-m` and requiring the functions that are
+called per pair and per field to appear as inlined. It builds a copy under a
+module path unique to the run, because a cached build does not compile and so
+reports nothing, and it fails rather than passes if it sees no inlining decisions
+at all.
+
 **Not going back to memory.** Measured on real music rather than the eight-second
 file, the coder was the whole cost: `Decode` a third of the profile and `Encode`
 a fifth, with the search behind them. Neither was doing much arithmetic. The
