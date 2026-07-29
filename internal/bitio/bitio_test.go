@@ -131,3 +131,45 @@ func TestWrite64MatchesWrite(t *testing.T) {
 		}
 	}
 }
+
+// TestPendingMatchesWrite64 checks that a caller holding the accumulator in
+// locals writes the same bits as one going through the Writer, and that it can
+// hand the accumulator back and forth mid-stream. The runs are deliberately
+// uneven so that Store lands at a different point in each of them.
+func TestPendingMatchesWrite64(t *testing.T) {
+	rng := rand.New(rand.NewSource(29))
+	local, direct := NewWriter(), NewWriter()
+	for run := 0; run < 200; run++ {
+		acc, nacc := local.Pending()
+		for i := rng.Intn(40); i >= 0; i-- {
+			n := rng.Intn(maxPut + 1)
+			v := rng.Uint64()
+			if n < 64 {
+				v &= 1<<uint(n) - 1
+			}
+			if nacc+n > 64 {
+				acc, nacc = local.Store(acc, nacc)
+			}
+			acc |= v << uint(64-nacc-n)
+			nacc += n
+			direct.Write64(v, n)
+		}
+		local.Resume(acc, nacc)
+		// Between runs the Writer is used directly, which only works if Resume
+		// left it in a state its own put can carry on from.
+		local.Write64(uint64(run), 8)
+		direct.Write64(uint64(run), 8)
+		if local.Tell() != direct.Tell() {
+			t.Fatalf("run %d: position %d vs %d", run, local.Tell(), direct.Tell())
+		}
+	}
+	a, b := local.Bytes(), direct.Bytes()
+	if len(a) != len(b) {
+		t.Fatalf("length %d vs %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("byte %d: %#02x vs %#02x", i, a[i], b[i])
+		}
+	}
+}

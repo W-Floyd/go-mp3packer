@@ -160,16 +160,7 @@ func (w *Writer) put(v uint64, n int) {
 // the next flush overwrites the remainder: every byte the Writer ever returns is
 // one it wrote itself, which is why the buffer needs slack but needs neither
 // zeroing nor reading back.
-func (w *Writer) flush() {
-	if w.nbyte+writerSlack > len(w.buf) {
-		w.grow(w.nbyte + writerSlack)
-	}
-	binary.BigEndian.PutUint64(w.buf[w.nbyte:], w.acc)
-	whole := w.nacc >> 3
-	w.nbyte += whole
-	w.acc <<= uint(whole * 8)
-	w.nacc -= whole * 8
-}
+func (w *Writer) flush() { w.acc, w.nacc = w.Store(w.acc, w.nacc) }
 
 func (w *Writer) grow(size int) {
 	if size <= cap(w.buf) {
@@ -184,6 +175,37 @@ func (w *Writer) grow(size int) {
 	copy(buf, w.buf)
 	w.buf = buf
 }
+
+// Pending, Store and Resume let a caller writing a long run of fields hold the
+// accumulator in locals rather than in the Writer.
+//
+// put is a call the inliner will not take, so every field costs a load of acc
+// and nacc, a store of both, and the store-to-load turnaround between one field
+// and the next — the same round trip through memory that PeekAt exists to spare
+// the reader. A caller that takes the pending bits with Pending, appends to them
+// in registers, spills with Store whenever the next field would not fit, and
+// hands them back with Resume pays none of it, and calls in here once every few
+// fields instead of once per field.
+//
+// The Writer's own bits are not valid between Pending and Resume, so nothing
+// else may write to it in between.
+func (w *Writer) Pending() (acc uint64, nacc int) { return w.acc, w.nacc }
+
+// Store commits acc's whole bytes to the buffer and returns what is left over,
+// which is under eight bits. It is Pending's counterpart in the loop: acc always
+// has room for another 57 bits afterwards.
+func (w *Writer) Store(acc uint64, nacc int) (uint64, int) {
+	if w.nbyte+writerSlack > len(w.buf) {
+		w.grow(w.nbyte + writerSlack)
+	}
+	binary.BigEndian.PutUint64(w.buf[w.nbyte:], acc)
+	whole := nacc >> 3
+	w.nbyte += whole
+	return acc << uint(whole*8), nacc - whole*8
+}
+
+// Resume returns the accumulator to the Writer.
+func (w *Writer) Resume(acc uint64, nacc int) { w.acc, w.nacc = acc, nacc }
 
 // Copy moves n bits from r to w without interpreting them. Used for
 // scalefactors, which are re-emitted verbatim: their layout depends on

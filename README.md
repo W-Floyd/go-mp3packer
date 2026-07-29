@@ -162,6 +162,7 @@ far:
 | memoised region costs not called per candidate | −1.1% | −1.8% |
 | prefix covers batched, candidates rejected before the call | −3.6% | −5.8% |
 | window-switched geometry in its own loop | −2.0% | not yet |
+| encoder's accumulator in registers | −4.8% | −5.3% |
 
 The pad is the one worth checking rather than assuming: it doubles a Reader from
 32 bytes to 64, and a 32 kB L1 is less forgiving than a 128 kB one. It pays on
@@ -403,6 +404,23 @@ The gain end to end is larger than the 1% to 4% of granules that switch, because
 under the old arrangement those were the most expensive granules in the file rather
 than the cheapest.
 
+**The encoder was writing through memory.** Appending a field went through
+`Writer.put`, which the inliner will not take, so every coefficient pair cost a
+load of the accumulator and its bit count, a store of both, and the store-to-load
+turnaround between one pair and the next. That is the same round trip `PeekAt`
+exists to spare the reader, and the write side never had an answer to it: the
+field group was already assembled in a register, and then handed to a call that
+put it straight back in memory. `Encode` now takes the accumulator with
+`Pending`, appends to it in two locals for the whole granule, spills with `Store`
+only when the next field would not fit — every three or four pairs — and hands it
+back with `Resume`. Nothing about the bits changes; all 24 corpus outputs are
+byte-identical. `BenchmarkEncodeGranule` goes from 827 ns to 618 ns, a quarter
+off, and `Write64` at 51% of `Encode` becomes `Store` at 12%. End to end on the
+two-and-a-half-minute track that is 197 ms to 187 ms on one worker, 4.8%, which
+is what `Encode` being 18.8% of a worker predicts; across sixteen it is 1.9%,
+since this is work that does parallelise. The Xeon agrees: 5135 ns to 4079 on the
+granule, 723 ms to 685 on the track.
+
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
 between the big-values and count1 regions barely changes the total — and it cost
@@ -427,10 +445,8 @@ that replaced them is not free. Folding just the `linbits > 0` half of the escap
 test into an out-of-range sentinel, as `decodeRegion` does, measured flat — the
 compiler was already hoisting it. A profile of `BenchmarkEncodeGranule` says why
 both were beside the point: `Write64` is 51% of `Encode` and `abs` is 0.9%. The
-encoder is bound by the bit writer's accumulator, a read-modify-write of `w.acc`
-and `w.nacc` on the critical path of every pair, which is the same store-to-load
-turnaround the decoder escaped by carrying its bit position in a local. That, not
-the coefficient arithmetic, is what an encode-side change has to attack.
+coefficient arithmetic was never the problem, which is what the next section is
+about.
 
 Narrowing `Spectrum` from `int` to `int32` was tried and reverted. It halves the
 4.6 kB a granule occupies and every copy, clear and compare of it, which looked

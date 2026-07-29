@@ -226,6 +226,13 @@ func decodeCount1(dst *Spectrum, r *bitio.Reader, pos, table, limit, bp int) (in
 // coefficient, which is guaranteed for the Config returned by Optimize.
 func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 	pos := 0
+	// The accumulator is carried in these two locals for the whole of the
+	// granule and handed back at the end, so that appending a field is a shift
+	// and an or in registers rather than a call into the Writer and a round trip
+	// through its state. Same reason the decoder keeps its bit position in a
+	// local: with the field group already assembled, the write side's critical
+	// path was the load-modify-store of acc and nacc, once per pair.
+	acc, nacc := w.Pending()
 	r0, r1, r2 := cfg.regionPairs(sampleRate)
 	regions := [3][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}}
 	for _, reg := range regions {
@@ -264,7 +271,12 @@ func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 			ny := uint(b2u(ay != 0))
 			word = word<<ny | uint64(y)>>63&uint64(ny)
 			n += int(ny)
-			w.Write64(word, n)
+
+			if nacc+n > 64 {
+				acc, nacc = w.Store(acc, nacc)
+			}
+			acc |= (word & (1<<uint(n) - 1)) << uint(64-nacc-n)
+			nacc += n
 			pos += 2
 		}
 	}
@@ -286,9 +298,15 @@ func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 			ns += nz
 		}
 		c := tab[sym]
-		w.Write64(uint64(c.bits)<<ns|signs, c.length+int(ns))
+		word, n := uint64(c.bits)<<ns|signs, c.length+int(ns)
+		if nacc+n > 64 {
+			acc, nacc = w.Store(acc, nacc)
+		}
+		acc |= (word & (1<<uint(n) - 1)) << uint(64-nacc-n)
+		nacc += n
 		pos += 4
 	}
+	w.Resume(acc, nacc)
 }
 
 // lastNonZero returns one past the index of the highest non-zero coefficient.
