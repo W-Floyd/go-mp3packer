@@ -61,105 +61,21 @@ func (c Config) regionPairs(sampleRate int) (r0, r1, r2 int) {
 // A false result means the granule cannot be safely recompressed — most often
 // because the frame references reservoir data that the file does not contain.
 func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int) bool {
-	// Every coefficient below pos is written before it is read, so only the tail
-	// above it has to be cleared, and that is done once at the end. Clearing the
-	// whole spectrum up front would rewrite 4.6kB per granule to no purpose: a
-	// dense granule leaves almost nothing above pos.
-	limit := r.Tell() + maxBits
+	// The bit position is carried through these calls in a local rather than in the
+	// Reader. Going through Peek64 and Skip for every symbol loads the stored
+	// position three times and stores it once, and the store-to-load turnaround
+	// lands on the loop's critical path; the Reader is resynchronised once at the
+	// end instead.
+	bp := r.Tell()
+	limit := bp + maxBits
 	pos := 0
-
-	// The bit limit is checked once per pair, never mid-symbol: a codeword that
-	// starts inside the granule is read whole, matching how decoders behave. A
-	// whole pair — code, escape magnitudes and signs — is at most 47 bits, so it
-	// comes out of one peeked word rather than bit by bit, and the first eight bits
-	// usually resolve the codeword in a single table lookup.
-	region := func(pairs, idx int) bool {
-		tree := tables[idx].tree
-		lut := &decodeTables[idx]
-		linbits := uint(tables[idx].linbits)
-		end := pos + 2*pairs
-		// Both of these depend only on the table, so they are settled before the
-		// loop rather than re-tested for every pair. Table 0 codes nothing, so it
-		// consumes no bits and cannot overrun the limit.
-		if len(tree) == 0 {
-			return pos >= end || pos >= NumCoefficients-1
-		}
-		checkLimit := idx != 0
-		// A magnitude of 15 escapes to linbits, but only for tables that have any.
-		// Setting the trigger out of range for the others folds "does this table
-		// escape" into the comparison the loop was making anyway.
-		escape := 15
-		if linbits == 0 {
-			escape = 16
-		}
-		for pos < end && pos < NumCoefficients-1 {
-			if checkLimit && r.Tell() >= limit {
-				return false
-			}
-			w := r.Peek64()
-			var sym, used int
-			if e := lut[w>>56]; !e.isLong() {
-				sym, used = e.symbol(), e.length()
-				w <<= uint(used)
-			} else {
-				node := e.node()
-				used, w = 8, w<<8
-				for {
-					v := tree[node]
-					if v >= 0 {
-						sym = int(v)
-						break
-					}
-					node++
-					if w>>63 != 0 {
-						node -= int(v)
-					}
-					w <<= 1
-					used++
-					if node >= len(tree) {
-						r.Skip(used)
-						return false
-					}
-				}
-			}
-
-			// Neither the sign bits nor whether a value is zero can be predicted, so
-			// neither is branched on. Applying a sign is an xor and an add — x^-1+1
-			// is -x, x^0+0 is x — and it is a no-op on zero for either sign bit,
-			// which leaves only the bit advance to depend on the value: a shift by
-			// the sign count, zero or one.
-			d := &pairDecode[sym]
-			x, y := int(d.x), int(d.y)
-			if x == escape {
-				x += int(w >> (64 - linbits))
-				w <<= linbits
-				used += int(linbits)
-			}
-			sx := int(w >> 63)
-			x = (x ^ -sx) + sx
-			w <<= uint(d.nx)
-			used += int(d.nx)
-
-			if y == escape {
-				y += int(w >> (64 - linbits))
-				w <<= linbits
-				used += int(linbits)
-			}
-			sy := int(w >> 63)
-			y = (y ^ -sy) + sy
-			used += int(d.ny)
-			dst[pos], dst[pos+1] = x, y
-			pos += 2
-			r.Skip(used)
-		}
-		return true
-	}
 
 	ok := true
 	r0, r1, r2 := cfg.regionPairs(sampleRate)
-	for _, reg := range [][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}} {
-		if !region(reg[0], reg[1]) {
-			ok = false
+	regions := [3][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}}
+	for _, reg := range regions {
+		pos, bp, ok = decodeRegion(dst, r, pos, reg[0], reg[1], limit, bp)
+		if !ok {
 			break
 		}
 	}
@@ -167,28 +83,11 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 	// Everything past the big values is coded as quadruples of -1, 0 or 1 until
 	// the granule's bits run out.
 	if ok {
-		lut := &decodeTables[cfg.Count1Table]
-		for pos <= NumCoefficients-4 && r.Tell() < limit {
-			w := r.Peek64()
-			e := lut[w>>56]
-			if e.isLong() {
-				ok = false // no count1 codeword exceeds six bits
-				break
-			}
-			sym, used := e.symbol(), e.length()
-			w <<= uint(used)
-			// One lookup covers the pattern and its signs together; the sign bits
-			// sit at the top of w now that the codeword has been shifted off.
-			q := &count1Quad[sym<<4|int(w>>60)]
-			dst[pos] = int(q[0])
-			dst[pos+1] = int(q[1])
-			dst[pos+2] = int(q[2])
-			dst[pos+3] = int(q[3])
-			pos += 4
-			r.Skip(used + int(count1Signs[sym]))
-		}
+		pos, bp, ok = decodeCount1(dst, r, pos, cfg.Count1Table, limit, bp)
 	}
-	if r.Tell() > r.Len() {
+
+	r.Seek(bp)
+	if bp > r.Len() {
 		ok = false // ran off the end of the available reservoir data
 	}
 	if !ok {
@@ -196,8 +95,131 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 		// result rather than pay to tidy it.
 		return false
 	}
+	// Every coefficient below pos was written before it could be read, so only the
+	// tail above it has to be cleared. Clearing the whole spectrum up front would
+	// rewrite 4.6kB per granule to no purpose: a dense granule leaves almost
+	// nothing above pos.
 	clear(dst[pos:])
 	return true
+}
+
+// decodeRegion decodes one Huffman region: up to pairs coefficient pairs with
+// table idx, starting at coefficient pos and bit position bp. It returns both
+// positions and whether the region decoded cleanly.
+//
+// The bit limit is checked once per pair, never mid-symbol: a codeword that
+// starts inside the granule is read whole, matching how decoders behave. A whole
+// pair — code, escape magnitudes and signs — is at most 47 bits, so it comes out
+// of one peeked word rather than bit by bit, and the first eight bits usually
+// resolve the codeword in a single table lookup.
+func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int) (int, int, bool) {
+	tree := tables[idx].tree
+	// A pair needs two coefficients, so the spectrum's own end bounds the region
+	// as much as the declared pair count does. Folding them together leaves one
+	// comparison per pair instead of two.
+	end := min(pos+2*pairs, NumCoefficients-1)
+	// Both of the next two depend only on the table, so they are settled before
+	// the loop rather than re-tested for every pair. Table 0 codes nothing, so it
+	// consumes no bits and cannot overrun the limit.
+	if len(tree) == 0 {
+		return pos, bp, pos >= end
+	}
+	lut := &decodeTables[idx]
+	linbits := uint(tables[idx].linbits)
+	checkLimit := idx != 0
+	// A magnitude of 15 escapes to linbits, but only for tables that have any.
+	// Setting the trigger out of range for the others folds "does this table
+	// escape" into the comparison the loop was making anyway.
+	escape := 15
+	if linbits == 0 {
+		escape = 16
+	}
+	for pos < end {
+		if checkLimit && bp >= limit {
+			return pos, bp, false
+		}
+		w := r.PeekAt(bp)
+		var sym, used int
+		if e := lut[w>>56]; !e.isLong() {
+			sym, used = e.symbol(), e.length()
+			w <<= uint(used)
+		} else {
+			node := e.node()
+			used, w = 8, w<<8
+			for {
+				v := tree[node]
+				if v >= 0 {
+					sym = int(v)
+					break
+				}
+				node++
+				if w>>63 != 0 {
+					node -= int(v)
+				}
+				w <<= 1
+				used++
+				if node >= len(tree) {
+					return pos, bp + used, false
+				}
+			}
+		}
+
+		// Neither the sign bits nor whether a value is zero can be predicted, so
+		// neither is branched on. Applying a sign is an xor and an add — x^-1+1 is
+		// -x, x^0+0 is x — and it is a no-op on zero for either sign bit, which
+		// leaves only the bit advance to depend on the value: a shift by the sign
+		// count, zero or one.
+		d := &pairDecode[sym]
+		x, y := int(d.x), int(d.y)
+		if x == escape {
+			x += int(w >> (64 - linbits))
+			w <<= linbits
+			used += int(linbits)
+		}
+		sx := int(w >> 63)
+		x = (x ^ -sx) + sx
+		w <<= uint(d.nx)
+		used += int(d.nx)
+
+		if y == escape {
+			y += int(w >> (64 - linbits))
+			w <<= linbits
+			used += int(linbits)
+		}
+		sy := int(w >> 63)
+		y = (y ^ -sy) + sy
+		used += int(d.ny)
+
+		dst[pos], dst[pos+1] = x, y
+		pos += 2
+		bp += used
+	}
+	return pos, bp, true
+}
+
+// decodeCount1 decodes the quadruple-coded tail from coefficient pos and bit
+// position bp until the granule's bits run out or the spectrum ends.
+func decodeCount1(dst *Spectrum, r *bitio.Reader, pos, table, limit, bp int) (int, int, bool) {
+	lut := &decodeTables[table]
+	for pos <= NumCoefficients-4 && bp < limit {
+		w := r.PeekAt(bp)
+		e := lut[w>>56]
+		if e.isLong() {
+			return pos, bp, false // no count1 codeword exceeds six bits
+		}
+		sym, used := e.symbol(), e.length()
+		w <<= uint(used)
+		// One lookup covers the pattern and its signs together; the sign bits sit
+		// at the top of w now that the codeword has been shifted off.
+		q := &count1Quad[sym<<4|int(w>>60)]
+		dst[pos] = int(q[0])
+		dst[pos+1] = int(q[1])
+		dst[pos+2] = int(q[2])
+		dst[pos+3] = int(q[3])
+		pos += 4
+		bp += used + int(count1Signs[sym])
+	}
+	return pos, bp, true
 }
 
 // Encode writes a spectrum using cfg. cfg must be able to represent every

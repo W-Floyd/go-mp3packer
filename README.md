@@ -139,8 +139,9 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | count1 quadruples and pair signs decoded without branching | 16.3 |
 | frame list and per-frame output preallocated, encoder invariants hoisted | 15.1 |
 | peeking the bit window inlined into its callers | 14.9 |
+| bits written through an accumulator, decode positions kept in registers | 14.3 |
 
-The last six rows were measured in one sitting, in which the row above them came
+The last seven rows were measured in one sitting, in which the row above them came
 out at 21.7 rather than the 20.5 recorded when it was new; treat the steps as
 relative to each other rather than to the older figures.
 
@@ -243,6 +244,27 @@ free, having scored 81 — one point over — and that is thirty-odd calls per f
 side info, so the layout-only path dropped another 10% on top of the search's 6%.
 It costs 40 bytes of `Reader`, which is stack-allocated in every hot path, and it
 means a reader has to be built through `NewReader` rather than as a bare literal.
+
+**Not going back to memory.** Measured on real music rather than the eight-second
+file, the coder was the whole cost: `Decode` a third of the profile and `Encode`
+a fifth, with the search behind them. Neither was doing much arithmetic. The
+writer merged every field into the buffer with a read-modify-write — load eight
+bytes, byte-swap, or, byte-swap, store — for each of the two or three fields a
+coefficient pair emits. Pending bits now sit in a register and reach the buffer
+eight bytes at a time, so a field is a shift and an or, and the buffer is never
+read at all: a flush stores a whole word and commits only the bytes it filled, so
+the next flush overwrites the rest. That took the writer from 12% of the profile to
+under 5%, and means the output buffer no longer has to arrive zeroed.
+
+The decoder's problem was the same shape. Its bit position lived in the Reader, so
+every symbol loaded it three times and stored it once, and the store-to-load
+turnaround sat on the loop's critical path — each symbol waiting on the previous
+one's bookkeeping rather than on its own work. The coefficient index had the same
+trouble for a different reason: it was captured by the closure that decoded a
+region, which forces it to memory. Passing both through plain functions and
+peeking at an explicit position keeps them in registers, and takes the big-values
+loop from 32% of the profile to 25%. Together the two are worth 4% of a repack on
+x86 and 7% on arm64.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
