@@ -25,7 +25,8 @@
       "columns": [
         {
           "input": "short",
-          "header": "ms"
+          "header": "ms",
+          "delta": true
         }
       ],
       "sigFigs": 3
@@ -35,11 +36,13 @@
       "columns": [
         {
           "input": "long1",
-          "header": "one worker, ms"
+          "header": "one worker, ms",
+          "delta": true
         },
         {
           "input": "longall",
-          "header": "all cores, ms"
+          "header": "all cores, ms",
+          "delta": true
         }
       ],
       "sigFigs": 3

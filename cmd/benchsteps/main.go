@@ -138,6 +138,17 @@ type table struct {
 type column struct {
 	Input  string `json:"input"`
 	Header string `json:"header"`
+
+	// Delta adds a column beside this one giving the change from the row above.
+	//
+	// It is the figure to quote and the figure to compare against another
+	// sitting. An absolute millisecond count is only meaningful next to the other
+	// absolutes taken with it — this machine drifts about 7% between sittings, so
+	// a row measured today and a row measured last week say more about the
+	// weather than about the code. A ratio between two rows of the same session
+	// divides that out, which is why the steps quoted in the prose are
+	// percentages and not times.
+	Delta bool `json:"delta,omitempty"`
 }
 
 type step struct {
@@ -902,31 +913,51 @@ func publishable(res results) (int, error) {
 }
 
 func render(res results, t table) (string, error) {
+	tol := map[string]float64{}
+	for _, in := range res.Inputs {
+		tol[in.ID] = tolFor(in, res.Tolerance)
+	}
+
 	var b strings.Builder
 	b.WriteString("|")
 	for _, c := range t.Columns {
 		b.WriteString(" | " + c.Header)
+		if c.Delta {
+			b.WriteString(" | Δ")
+		}
 	}
 	b.WriteString(" |\n| ---")
-	for range t.Columns {
+	for _, c := range t.Columns {
 		b.WriteString(" | ---")
+		if c.Delta {
+			b.WriteString(" | ---")
+		}
 	}
 	b.WriteString(" |\n")
 
+	prev := map[string]float64{}
 	for _, s := range res.Steps {
 		if !slices.Contains(s.Tables, t.ID) {
 			continue
 		}
-		cells := make([]string, len(t.Columns))
+		var cells []string
 		any := false
-		for i, c := range t.Columns {
+		for _, c := range t.Columns {
 			runs := s.Cells[c.Input].inSession(res.Session)
 			if len(runs) == 0 {
-				cells[i] = "—"
+				cells = append(cells, "—")
+				if c.Delta {
+					cells = append(cells, "—")
+				}
 				continue
 			}
 			any = true
-			cells[i] = sigFigs(median(runs)/1e6, t.SigFigs)
+			v := median(runs) / 1e6
+			cells = append(cells, sigFigs(v, t.SigFigs))
+			if c.Delta {
+				cells = append(cells, deltaCell(prev[c.Input], v, tol[c.Input]))
+			}
+			prev[c.Input] = v
 		}
 		if !any {
 			continue // nothing measured for this row; leave it out rather than imply a gap
@@ -934,6 +965,30 @@ func render(res results, t table) (string, error) {
 		b.WriteString("| " + s.Label + " | " + strings.Join(cells, " | ") + " |\n")
 	}
 	return b.String(), nil
+}
+
+// deltaCell is the change from the previous row, in per cent, parenthesised when
+// it is inside what the settling target can resolve.
+//
+// Two medians each good to t differ by chance with a standard error near t root
+// two, so about three t is the least that means anything. Printing a bracketed
+// number rather than nothing keeps the direction visible while saying plainly
+// that it is not a result — several of these rows are steps that are real but
+// only measurable elsewhere.
+func deltaCell(prev, v, tol float64) string {
+	if prev == 0 {
+		return "—"
+	}
+	d := 100 * (v - prev) / prev
+	// U+2212, to match the rest of the document rather than a hyphen.
+	txt := strings.Replace(strconv.FormatFloat(d, 'f', 1, 64), "-", "\u2212", 1) + "%"
+	if d > 0 {
+		txt = "+" + txt
+	}
+	if math.Abs(d) < 300*tol {
+		return "(" + txt + ")"
+	}
+	return txt
 }
 
 // sigFigs formats v to n significant figures, without exponent notation.
