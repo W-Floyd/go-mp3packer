@@ -246,8 +246,8 @@ was worth nothing at all, and it changes an exported type, so it went back.
 
 ### Assembly
 
-Three kernels have hand-written arm64 (NEON) and amd64 (SSE2) implementations,
-with portable Go equivalents for every other architecture:
+Three kernels have hand-written arm64 (NEON) and amd64 (SSE2/SSE4.1/AVX2)
+implementations, with portable Go equivalents for every other architecture:
 
 | | asm | Go | |
 | --- | --- | --- | --- |
@@ -277,20 +277,43 @@ horizontal minimum, but Go's arm64 assembler cannot yet emit one — it is in th
 `simd` package's arm64 generator input, so if that lands these kernels could
 collapse into one Go source instead of two `.s` files.
 
-Both reduction kernels have two amd64 versions, chosen once by `CPUID`. SSE2 has
-no 32-bit minimum at all, so each one costs six instructions to emulate, and these
-kernels are almost nothing but minimums; SSE4.1's `PMINUD` does it in one. That
-earns the feature check twice over — `bestTails` more than halves — and since
-every x86 since 2008 takes the SSE4.1 path, `TestKernelsSSE2Fallback` forces the
-emulated one so it stays covered. Measured on a Xeon E5-2698 v4:
+On amd64 each kernel has up to three forms, chosen once by `CPUID`. SSE2 is the
+baseline and has no 32-bit minimum at all, so every one costs six instructions to
+emulate — and the reductions are almost nothing but minimums, which is what earns
+the first feature check: SSE4.1's `PMINUD` does it in one.
 
-| | SSE2 | SSE4.1 | |
-| --- | --- | --- | --- |
-| `bestTails` | 255 ns | 116 ns | 2.2× |
-| `bestTable` | 16.0 ns | 11.7 ns | 1.4× |
+AVX2 then halves the register count, because 32 `int32` lanes are four 256-bit
+registers rather than eight 128-bit ones, and its three-operand encoding takes a
+memory source directly. That second part matters more than the width: SSE is
+two-operand and destructive, so almost every instruction needs a register copy
+first, and those disappear. A row of `bestTails` becomes four subtracts straight
+out of memory and three minimums, against eight loads, eight copies, eight
+subtracts and seven minimums. `accumulate` gains most, having had no SSE4.1 form
+at all — its eight load-and-add pairs collapse to four adds with memory operands.
+Measured on a Xeon E5-2698 v4 at a locked 2.2 GHz:
 
-The figures in the first table are arm64. x86-64 is tested in CI, and both amd64
-paths were verified and benchmarked on hardware.
+| | SSE2 | SSE4.1 | AVX2 | |
+| --- | --- | --- | --- | --- |
+| `accumulate` | 1004 ns | — | 574 ns | 1.7× |
+| `bestTails` | 255 ns | 116 ns | 84 ns | 3.0× |
+| `bestTable` | 16.0 ns | 11.7 ns | 8.6 ns | 1.9× |
+
+End to end that is 7% off one worker and 9% off all forty, which is less than the
+kernels suggest for the ordinary reason: they are a quarter of the x86 profile, so
+a third off them is 8% off the total. What stops AVX2 doing better is no longer
+instruction count but the six-instruction serial fold at the end of each row, plus
+four 32-byte loads against two load ports.
+
+Detection asks for more than the AVX2 feature bit: the YMM registers are only
+usable if the operating system has enabled saving them, so `OSXSAVE` and `XGETBV`
+are checked too, and every AVX2 path ends in `VZEROUPPER` — returning to Go's SSE
+code with the upper halves live costs far more than the kernel saves. Every x86
+since about 2013 takes the AVX2 path and everything since 2008 takes SSE4.1, so
+the narrower forms would otherwise never run anywhere:
+`TestKernelsDispatchPaths` forces each one in turn and holds it to the portable Go.
+
+The figures in the first table are arm64. x86-64 is tested in CI, and all three
+amd64 paths were verified and benchmarked on hardware.
 
 ## The compression ceiling
 

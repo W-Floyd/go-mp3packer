@@ -1,9 +1,15 @@
 #include "textflag.h"
 
-// The accumulation kernel is pure SSE2, which is baseline on amd64. The two
-// reduction kernels have a second version using SSE4.1's packed minimum: SSE2
-// has no 32-bit minimum at all, so each one costs six instructions to emulate,
-// and the reductions are almost nothing but minimums.
+// Three forms of each kernel, dispatched on the feature bytes set at startup.
+// SSE2 is the amd64 baseline and has no 32-bit minimum, so each one costs six
+// instructions to emulate; SSE4.1 has PMINUD; AVX2 halves the register count
+// (32 int32 lanes are four 256-bit registers, not eight 128-bit ones) and its
+// three-operand encoding takes a memory source directly, which removes the
+// copy that two-operand SSE needs before every destructive operation.
+//
+// Every AVX2 path ends in VZEROUPPER. Returning to Go's SSE code with the upper
+// halves of the YMM registers live costs far more on this hardware than the
+// kernel saves.
 
 // func cpuHasSSE41() bool
 TEXT ·cpuHasSSE41(SB), NOSPLIT, $0-1
@@ -13,6 +19,32 @@ TEXT ·cpuHasSSE41(SB), NOSPLIT, $0-1
 	SHRL $19, CX // ECX bit 19 reports SSE4.1
 	ANDL $1, CX
 	MOVB CX, ret+0(FP)
+	RET
+
+// func cpuHasAVX2() bool
+TEXT ·cpuHasAVX2(SB), NOSPLIT, $0-1
+	// The instruction bit alone is not enough: the YMM registers are only usable
+	// if the OS has enabled saving them, which is what OSXSAVE and XGETBV report.
+	MOVL $1, AX
+	XORL CX, CX
+	CPUID
+	ANDL $(1<<27), CX // OSXSAVE
+	JZ   avx2none
+	XORL CX, CX
+	XGETBV            // enabled state mask into AX
+	ANDL $6, AX       // XMM and YMM state both saved
+	CMPL AX, $6
+	JNE  avx2none
+	MOVL $7, AX
+	XORL CX, CX
+	CPUID
+	SHRL $5, BX // CPUID.(EAX=7,ECX=0):EBX bit 5 reports AVX2
+	ANDL $1, BX
+	MOVB BX, ret+0(FP)
+	RET
+
+avx2none:
+	MOVB $0, ret+0(FP)
 	RET
 
 // func accumulate(acc *[32]int32, keys []uint32)
@@ -25,6 +57,9 @@ TEXT ·accumulate(SB), NOSPLIT, $0-32
 
 	LEAQ ·pairCostTable(SB), R8
 	LEAQ ·escapeCostTable(SB), R9
+
+	CMPB ·hasAVX2(SB), $0
+	JNE  accavx2
 
 	// X0-X7 hold the running per-table totals for the whole loop.
 	MOVOU 0(AX), X0
@@ -123,6 +158,53 @@ store:
 	MOVOU X5, 80(AX)
 	MOVOU X6, 96(AX)
 	MOVOU X7, 112(AX)
+	RET
+
+// Y0-Y3 hold the running totals. Each row is added straight out of memory, so a
+// pair costs four adds rather than eight loads and eight adds.
+accavx2:
+	VMOVDQU 0(AX), Y0
+	VMOVDQU 32(AX), Y1
+	VMOVDQU 64(AX), Y2
+	VMOVDQU 96(AX), Y3
+
+accavx2loop:
+	MOVL (SI), DX
+	ADDQ $4, SI
+
+	MOVL DX, BX
+	ANDL $0xFF, BX
+	SHLQ $7, BX
+	ADDQ R8, BX
+
+	VPADDD 0(BX), Y0, Y0
+	VPADDD 32(BX), Y1, Y1
+	VPADDD 64(BX), Y2, Y2
+	VPADDD 96(BX), Y3, Y3
+
+	MOVL DX, DI
+	ANDL $0xF00, DI
+	JZ   accavx2next
+
+	SHRL $8, DI
+	SHLQ $7, DI
+	ADDQ R9, DI
+
+	VPADDD 0(DI), Y0, Y0
+	VPADDD 32(DI), Y1, Y1
+	VPADDD 64(DI), Y2, Y2
+	VPADDD 96(DI), Y3, Y3
+
+accavx2next:
+	DECQ CX
+	JNZ  accavx2loop
+
+	VMOVDQU Y0, 0(AX)
+	VMOVDQU Y1, 32(AX)
+	VMOVDQU Y2, 64(AX)
+	VMOVDQU Y3, 96(AX)
+	VZEROUPPER
+	RET
 
 done:
 	RET
@@ -148,6 +230,8 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	MOVQ to+8(FP), BX
 	LEAQ ·laneIndex(SB), DI
 
+	CMPB ·hasAVX2(SB), $0
+	JNE  keybestavx2
 	CMPB ·hasSSE41(SB), $0
 	JNE  keybest41
 
@@ -186,6 +270,38 @@ TEXT ·bestTable(SB), NOSPLIT, $0-20
 	PXOR   X2, X0
 
 	MOVL X0, ret+16(FP)
+	RET
+
+// Four 256-bit registers cover all 32 lanes, and both the subtrahend and the
+// lane labels come straight from memory.
+keybestavx2:
+	VMOVDQU 0(BX), Y0
+	VMOVDQU 32(BX), Y1
+	VMOVDQU 64(BX), Y2
+	VMOVDQU 96(BX), Y3
+	VPSUBD 0(AX), Y0, Y0
+	VPSUBD 32(AX), Y1, Y1
+	VPSUBD 64(AX), Y2, Y2
+	VPSUBD 96(AX), Y3, Y3
+	VPOR 0(DI), Y0, Y0
+	VPOR 32(DI), Y1, Y1
+	VPOR 64(DI), Y2, Y2
+	VPOR 96(DI), Y3, Y3
+
+	VPMINUD Y1, Y0, Y0
+	VPMINUD Y3, Y2, Y2
+	VPMINUD Y2, Y0, Y0
+
+	// Fold 8 lanes to 1: across the two halves, then pairs, then singles.
+	VEXTRACTI128 $1, Y0, X1
+	VPMINUD X1, X0, X0
+	VPSHUFD $0xB1, X0, X1
+	VPMINUD X1, X0, X0
+	VPSHUFD $0x4E, X0, X1
+	VPMINUD X1, X0, X0
+
+	VMOVD X0, ret+16(FP)
+	VZEROUPPER
 	RET
 
 // KEYMIN41 is KEYMIN with the emulated minimum replaced by the real one. Costs
@@ -244,6 +360,9 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	JZ    tailsdone
 
 	LEAQ ·laneIndex(SB), BX
+
+	CMPB ·hasAVX2(SB), $0
+	JNE  tailsavx2
 
 	// acc and the lane labels stay in registers for the whole run: X0-X7 hold
 	// acc<<5 with the lane already folded in, so each row costs one subtract per
@@ -323,6 +442,49 @@ tailsloop:
 	JNZ   tailsloop
 
 tailsdone:
+	RET
+
+// Y0-Y3 keep the scaled and labelled accumulator for the whole run. A row is
+// then four subtracts straight from memory and three minimums, with no loads and
+// no register copies of its own.
+tailsavx2:
+	VMOVDQU 0(AX), Y0
+	VMOVDQU 32(AX), Y1
+	VMOVDQU 64(AX), Y2
+	VMOVDQU 96(AX), Y3
+	VPSLLD $5, Y0, Y0
+	VPSLLD $5, Y1, Y1
+	VPSLLD $5, Y2, Y2
+	VPSLLD $5, Y3, Y3
+	VPOR 0(BX), Y0, Y0
+	VPOR 32(BX), Y1, Y1
+	VPOR 64(BX), Y2, Y2
+	VPOR 96(BX), Y3, Y3
+
+tailsavx2loop:
+	VPSUBD 0(SI), Y0, Y4
+	VPSUBD 32(SI), Y1, Y5
+	VPSUBD 64(SI), Y2, Y6
+	VPSUBD 96(SI), Y3, Y7
+
+	VPMINUD Y5, Y4, Y4
+	VPMINUD Y7, Y6, Y6
+	VPMINUD Y6, Y4, Y4
+
+	VEXTRACTI128 $1, Y4, X5
+	VPMINUD X5, X4, X4
+	VPSHUFD $0xB1, X4, X5
+	VPMINUD X5, X4, X4
+	VPSHUFD $0x4E, X4, X5
+	VPMINUD X5, X4, X4
+
+	VMOVD X4, (DI)
+	ADDQ  $4, DI
+	ADDQ  $128, SI
+	DECQ  CX
+	JNZ   tailsavx2loop
+
+	VZEROUPPER
 	RET
 
 // TAILMIN41 is TAILMIN with the emulated minimum replaced by the real one.
