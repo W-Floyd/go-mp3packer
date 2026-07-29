@@ -396,6 +396,30 @@ rest — so build with `-tags mp3timing` for the two stages reported separately.
 Read those for attribution and the total for A/B: the per-call stage clocks are
 much noisier than the wall clock.
 
+**The reservoir was built twice.** `layout` placed every frame's data into a
+`stream` buffer and then copied that buffer into the output — a second copy of
+the whole audio, and an allocation to hold it. The first of its two passes never
+needed the bytes: choosing a frame's size and its reservoir offset takes lengths
+only. It now records the pieces instead — each frame's data, and the gap runs
+left where the reservoir cannot reach back far enough — and the emitting pass
+reads them straight out of the frames' own buffers. A frame's slot is a window
+over that sequence and generally spans more than one piece, which is the whole
+point of a bit reservoir, so the read side is a cursor rather than a slice.
+
+That is 3.27 ms to 3.11 ms on the serial path of the long track, winning all five
+interleaved pairs, and 26.9 MB to 19.4 MB of allocation per repack. The
+allocation saved is twice the size of the audio, because the gap padding pushed
+`stream` past the capacity it had been given and it doubled. Across all cores it
+is worth about 0.9%, which does not clear the noise there.
+
+Caching `Frame.MainDataBits` was the other half of this item and was dropped.
+Recomputing it — a loop over granules and channels summing `part2_3_length`, from
+four call sites — was 30 ms of a 440 ms profile when it was first noted. On the
+current code it is 1.4% of the serial-path profile and does not appear in the
+one-worker profile at all, which is around 0.3% of an all-cores repack for a
+cache that has to be threaded through four callers. Everything around it got
+faster and it stopped being worth the plumbing.
+
 **The search that was not one.** A window-switched granule has no split to
 enumerate: the standard fixes where region0 ends, at the ninth long band or the
 third short band across all three windows, and there is no third region. Two spans

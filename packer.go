@@ -415,10 +415,8 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 	// How many bytes of reservoir each frame needs to have banked before it,
 	// because its own data is larger than one frame can carry.
 	need := make([]int, n+1)
-	total := 0
 	for i := n - 1; i >= 0; i-- {
 		need[i] = max(0, len(work[i].data)+need[i+1]-frames[i].Header.MaxDataSize())
-		total += len(work[i].data)
 	}
 	if need[0] > 0 {
 		return nil, fmt.Errorf("%w: first frame is short by %d bytes", ErrReservoirOverflow, need[0])
@@ -430,22 +428,26 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		}
 	}
 
-	// Place the data first, then emit frames around it. stream is the new
-	// reservoir: frame data end to end, with explicit gaps wherever the
-	// reservoir would otherwise overflow the 9-bit back-reference.
-	stream := make([]byte, 0, total)
+	// Place the data first, then emit frames around it. The new reservoir is
+	// the frames' data end to end, with explicit gaps wherever it would
+	// otherwise overflow the 9-bit back-reference — but only its shape is
+	// needed here, since deciding a frame's size takes lengths and not bytes.
+	// Recording the pieces rather than concatenating them saves a second copy
+	// of the whole audio and the allocation to hold it; the second pass reads
+	// the frames' own buffers.
+	stream := reservoir{segs: make([]segment, 0, n+8)}
 	capacity := 0
 	chosen := make([]mp3.Capacity, n)
 	mdb := make([]int, n)
 	gaps := 0
 	for i := range frames {
 		h := frames[i].Header
-		avail := capacity - len(stream)
+		avail := capacity - stream.len
 		if avail > h.MaxMainDataBegin() {
 			// More reservoir than the side info can point back to: the excess
 			// becomes unused padding inside earlier frames.
 			pad := avail - h.MaxMainDataBegin()
-			stream = appendZeros(stream, pad)
+			stream.addGap(pad)
 			avail = h.MaxMainDataBegin()
 			gaps += pad
 		}
@@ -456,7 +458,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		want := len(work[i].data) + need[i+1] - avail
 		chosen[i] = smallestCapacity(h, want)
 		mdb[i] = avail
-		stream = append(stream, work[i].data...)
+		stream.addData(work[i].data)
 		capacity += chosen[i].DataSize
 	}
 	if gaps > 0 {
@@ -493,17 +495,72 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		}
 		out = append(out, sideRaw...)
 
-		end := min(cursor+chosen[i].DataSize, len(stream))
-		out = append(out, stream[cursor:end]...)
+		end := min(cursor+chosen[i].DataSize, stream.len)
+		out = stream.appendTo(out, end-cursor)
 		if pad := chosen[i].DataSize - (end - cursor); pad > 0 {
 			out = appendZeros(out, pad) // tail of the last frames
 		}
 		cursor = end
 	}
-	if cursor != len(stream) {
-		return nil, fmt.Errorf("%w: %d bytes left over", ErrReservoirOverflow, len(stream)-cursor)
+	if cursor != stream.len {
+		return nil, fmt.Errorf("%w: %d bytes left over", ErrReservoirOverflow, stream.len-cursor)
 	}
 	return out, nil
+}
+
+// segment is one run of the new reservoir: a frame's data, or a gap that had to
+// be left because the reservoir could not reach back far enough.
+type segment struct {
+	data  []byte // nil for a gap
+	zeros int
+}
+
+func (s segment) size() int {
+	if s.data == nil {
+		return s.zeros
+	}
+	return len(s.data)
+}
+
+// reservoir is the new main-data stream described rather than built: the pieces
+// in order, plus a read cursor for the second pass. A frame's slot is a window
+// over the sequence and generally spans more than one piece, which is the whole
+// point of the bit reservoir.
+type reservoir struct {
+	segs []segment
+	len  int
+
+	at, off int // read position: segment, and byte within it
+}
+
+func (r *reservoir) addGap(n int) {
+	r.segs = append(r.segs, segment{zeros: n})
+	r.len += n
+}
+
+func (r *reservoir) addData(b []byte) {
+	r.segs = append(r.segs, segment{data: b})
+	r.len += len(b)
+}
+
+// appendTo copies the next n bytes of the reservoir onto out.
+func (r *reservoir) appendTo(out []byte, n int) []byte {
+	for n > 0 && r.at < len(r.segs) {
+		s := r.segs[r.at]
+		take := min(n, s.size()-r.off)
+		if s.data == nil {
+			out = appendZeros(out, take)
+		} else {
+			out = append(out, s.data[r.off:r.off+take]...)
+		}
+		r.off += take
+		n -= take
+		if r.off == s.size() {
+			r.at++
+			r.off = 0
+		}
+	}
+	return out
 }
 
 // smallestCapacity returns the cheapest frame size holding at least want bytes,
