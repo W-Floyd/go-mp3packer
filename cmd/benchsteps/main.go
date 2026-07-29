@@ -982,28 +982,36 @@ func render(res results, t table) (string, error) {
 // probably fine.
 const worseFactor = 2
 
-// deltaCell is the change from the previous row, in per cent, bracketed when it
-// is inside what the settling target can resolve.
+// deltaCell is the change from the previous row in per cent, or "≈" when the
+// measurement cannot support a direction.
 //
 // Two medians each good to t differ by chance with a standard error near t root
-// two, so about three t is the least a decrease can mean anything at, and
-// worseFactor times that for an increase. Printing a bracketed number rather
-// than nothing keeps the direction visible while saying plainly that it is not a
-// result — several of these rows are steps that are real but only measurable
-// elsewhere.
+// two, so a decrease has to reach about three t — a little over two sigma —
+// before it means anything, and an increase worseFactor times that, a little
+// over four.
+//
+// Anything short of that prints as "≈" rather than as a signed number in
+// brackets, which is what it used to do. A bracket is not enough: "(+1.1%)" is
+// read as a slight worsening by anyone skimming, and there is no evidence for a
+// worsening at all. The honest content of such a cell is that nothing was
+// measured, and several of these rows are steps that are real and demonstrated
+// by other means, which the prose says.
 func deltaCell(prev, v, tol float64) string {
 	if prev == 0 {
 		return "—"
 	}
 	d := 100 * (v - prev) / prev
-	// U+2212, to match the rest of the document rather than a hyphen.
-	txt := strings.Replace(strconv.FormatFloat(d, 'f', 1, 64), "-", "\u2212", 1) + "%"
 	bar := 300 * tol
 	if d > 0 {
-		txt, bar = "+"+txt, bar*worseFactor
+		bar *= worseFactor
 	}
 	if math.Abs(d) < bar {
-		return "(" + txt + ")"
+		return "≈"
+	}
+	// U+2212, to match the rest of the document rather than a hyphen.
+	txt := strings.Replace(strconv.FormatFloat(d, 'f', 1, 64), "-", "\u2212", 1) + "%"
+	if d > 0 {
+		txt = "+" + txt
 	}
 	return txt
 }

@@ -15,8 +15,8 @@ func TestDeltaCellAsymmetry(t *testing.T) {
 	}{
 		{"first row has nothing to compare with", 0, 100, "—"},
 		{"a decrease past the bar is a result", 100, 94, "−6.0%"},
-		{"a decrease inside it is not", 100, 97, "(−3.0%)"},
-		{"an increase of the same size is not, either", 100, 106, "(+6.0%)"},
+		{"a decrease inside it says nothing", 100, 97, "≈"},
+		{"an increase of the same size says nothing either", 100, 106, "≈"},
 		{"an increase needs twice as much", 100, 110, "+10.0%"},
 	} {
 		if got := deltaCell(c.prev, c.v, tol); got != c.want {

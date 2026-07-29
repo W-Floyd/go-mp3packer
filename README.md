@@ -139,20 +139,20 @@ itself rather than the core count:
 | region search reduced to arithmetic | 18.2 | −20.3% |
 | count1 quadruples and pair signs branchless | 17.4 | −4.7% |
 | preallocation, encoder invariants hoisted | 16.4 | −5.9% |
-| AVX2 path for the cost kernels | 16.6 | (+1.2%) |
-| bit window's tail read from a pad | 16.3 | (−1.3%) |
-| AVX2 tail reduction batched four rows | 16.2 | (−0.6%) |
+| AVX2 path for the cost kernels | 16.6 | ≈ |
+| bit window's tail read from a pad | 16.3 | ≈ |
+| AVX2 tail reduction batched four rows | 16.2 | ≈ |
 | coder's state kept out of memory | 15.2 | −6.7% |
-| memoised region costs not called per candidate | 14.7 | (−2.7%) |
-| prefix covers batched | 14.2 | (−3.8%) |
-| before the frame CRC was folded | 14.2 | (−0.1%) |
-| frame CRC folded a byte at a time | 14.2 | (−0.1%) |
-| window-switched geometry in its own loop | 14.1 | (−0.7%) |
-| encoder's accumulator held in registers | 13.6 | (−3.1%) |
-| reservoir described rather than built | 13.7 | (+0.2%) |
-| side info written into the frame | 13.7 | (+0.1%) |
-| frame CRC folded four bytes at a time | 13.6 | (−0.5%) |
-| frame data read from the reservoir in place | 13.7 | (+0.8%) |
+| memoised region costs not called per candidate | 14.7 | ≈ |
+| prefix covers batched | 14.2 | ≈ |
+| before the frame CRC was folded | 14.2 | ≈ |
+| frame CRC folded a byte at a time | 14.2 | ≈ |
+| window-switched geometry in its own loop | 14.1 | ≈ |
+| encoder's accumulator held in registers | 13.6 | ≈ |
+| reservoir described rather than built | 13.7 | ≈ |
+| side info written into the frame | 13.7 | ≈ |
+| frame CRC folded four bytes at a time | 13.6 | ≈ |
+| frame data read from the reservoir in place | 13.7 | ≈ |
 <!-- /benchsteps:steps-short -->
 
 One row per commit, which is as fine as the history goes. An earlier
@@ -171,22 +171,22 @@ two and a half minutes of real music, 6071 frames:
 | NEON / SSE2 kernels | 492 | −76.8% | 50.4 | −71.8% |
 | tail costs batched, decode by table lookup | 310 | −37.0% | 35.5 | −29.5% |
 | region search reduced to arithmetic | 264 | −15.0% | 29.1 | −18.0% |
-| count1 quadruples and pair signs branchless | 259 | (−1.7%) | 29.0 | (−0.4%) |
+| count1 quadruples and pair signs branchless | 259 | ≈ | 29.0 | ≈ |
 | preallocation, encoder invariants hoisted | 246 | −4.9% | 26.7 | −7.9% |
-| AVX2 path for the cost kernels | 246 | (+0.0%) | 27.1 | (+1.6%) |
-| bit window's tail read from a pad | 240 | (−2.8%) | 25.7 | −5.3% |
-| AVX2 tail reduction batched four rows | 239 | (−0.1%) | 25.6 | (−0.5%) |
+| AVX2 path for the cost kernels | 246 | ≈ | 27.1 | ≈ |
+| bit window's tail read from a pad | 240 | ≈ | 25.7 | −5.3% |
+| AVX2 tail reduction batched four rows | 239 | ≈ | 25.6 | ≈ |
 | coder's state kept out of memory | 220 | −7.9% | 24.3 | −4.9% |
-| memoised region costs not called per candidate | 218 | (−1.1%) | 24.1 | (−0.9%) |
-| prefix covers batched | 210 | (−3.7%) | 23.5 | (−2.4%) |
-| before the frame CRC was folded | 211 | (+0.3%) | 23.4 | (−0.6%) |
-| frame CRC folded a byte at a time | 207 | (−1.9%) | 19.6 | −16.2% |
-| window-switched geometry in its own loop | 205 | (−0.7%) | 19.3 | (−1.7%) |
-| encoder's accumulator held in registers | 196 | (−4.5%) | 18.5 | (−3.9%) |
-| reservoir described rather than built | 198 | (+1.2%) | 18.3 | (−1.3%) |
-| side info written into the frame | 197 | (−0.9%) | 18.5 | (+1.1%) |
-| frame CRC folded four bytes at a time | 196 | (−0.2%) | 17.8 | (−3.6%) |
-| frame data read from the reservoir in place | 197 | (+0.2%) | 17.9 | (+0.4%) |
+| memoised region costs not called per candidate | 218 | ≈ | 24.1 | ≈ |
+| prefix covers batched | 210 | ≈ | 23.5 | ≈ |
+| before the frame CRC was folded | 211 | ≈ | 23.4 | ≈ |
+| frame CRC folded a byte at a time | 207 | ≈ | 19.6 | −16.2% |
+| window-switched geometry in its own loop | 205 | ≈ | 19.3 | ≈ |
+| encoder's accumulator held in registers | 196 | ≈ | 18.5 | ≈ |
+| reservoir described rather than built | 198 | ≈ | 18.3 | ≈ |
+| side info written into the frame | 197 | ≈ | 18.5 | ≈ |
+| frame CRC folded four bytes at a time | 196 | ≈ | 17.8 | ≈ |
+| frame data read from the reservoir in place | 197 | ≈ | 17.9 | ≈ |
 <!-- /benchsteps:steps-long -->
 
 End to end that is 2126 ms down to 197 on one worker, and 179 to 17.9 across
@@ -195,16 +195,18 @@ sixteen — 10.8× and 10.0×, by quite different routes.
 The Δ columns are the change from the row above, and they are the figures to
 quote: a millisecond count means something only beside the others taken with it,
 where a ratio between two rows of one session survives the drift between
-sittings. A Δ in brackets is inside what the settling target can resolve — not a
-result, direction only. An increase has to be twice as large as a decrease before
-it comes out of brackets, for which see below.
+sittings. A Δ of ≈ means the measurement cannot support a direction, so none is
+given; an increase has to clear twice the bar a decrease does before it is
+printed at all. Both are explained below.
 
 Read the two columns against each other rather than down. The frame CRC fold is
-the clearest thing here: (−1.9%) on one worker, unresolved, against −16.2% across
-sixteen, which is as large as any step since the kernels. It comes entirely out
-of the part no number of workers can share. Nothing else in the recent history
-clears the bar on this evidence at all — and rather than pretend otherwise, the
-steps below are claimed from the measurements that can see them:
+the clearest thing here: ≈ on one worker against −16.2% across sixteen, which is
+as large as any step since the kernels. It comes entirely out of the part no
+number of workers can share. Nothing else in the recent history clears the bar on
+this evidence at all — thirteen of the nineteen steps are ≈, which is a statement
+about the target these were taken at and not about the commits. Rather than
+pretend otherwise, the steps below are claimed from the measurements that can see
+them:
 
 - the encoder accumulator, bracketed here at both worker counts, is −4.8% and
   −5.3% on one worker on the two machines, from eight rotated pairs each;
@@ -237,10 +239,10 @@ interleaved in a rotating order, with each individual run recorded in
 
 Work out what that target buys before reading anything into a small step. Two
 medians each good to *t* differ by chance with a standard error of about *t*√2, so
-a difference needs roughly 3*t* before it means anything. At the 1.5% these were
-taken at that is **about 4%**, which is most of the recent history — the Δ columns
-bracket every step inside it, so the tables say so themselves rather than leaving
-it to be worked out.
+a decrease needs roughly 3*t* — a little over two sigma — before it means
+anything. At the 1.5% these were taken at that is **about 4%**, which is most of
+the recent history. Those cells read ≈ rather than a number, so the tables state
+their own limits instead of leaving them to be worked out.
 
 Tightening to 0.5% would bring the bar to about 1.5%, at four times the runs and
 something over half an hour. That was not worth it here, because a row that
@@ -248,15 +250,19 @@ matters can be settled far more cheaply by a direct A/B of two commits with the
 order rotated, and that is what the claims above rest on. The tables are for the
 shape of twenty steps at once; they are not the instrument for judging one.
 
-An *increase* has to clear twice that bar, so about 9% at the target used here.
-Benchmark noise is one-sided — a run can be delayed by other work on the machine
-and never hurried by it — so an apparent slowdown is the direction noise already
-favours and deserves the higher standard. The consequences are lopsided too:
-missing a real improvement leaves a row reading flat, and it can be shown
-elsewhere, whereas publishing a regression that is not there sends the next
-person hunting something that does not exist in a commit that is probably fine.
-No cell in the tables above is affected by this — the largest increase in either
-is 1.6% — so it is a guard on what gets added, not a correction to what is here.
+An *increase* has to clear twice that bar — about 9% here, or a little over four
+sigma. Benchmark noise is one-sided, since a run can be delayed by other work on
+the machine and never hurried by it, so an apparent slowdown is the direction
+noise already favours and deserves the higher standard. The consequences are
+lopsided the same way: missing a real improvement leaves a row reading ≈, and it
+can be shown elsewhere, whereas printing a regression that is not there sends the
+next person hunting something that does not exist in a commit that is probably
+fine.
+
+Which is why an unresolved cell prints ≈ and not the number in brackets, as it
+first did. A bracket is not enough — "(+1.1%)" is read as a slight worsening by
+anyone skimming, and there is no evidence for a worsening at all. If a direction
+cannot be supported, none is offered.
 
 Several adjacent rows here are within noise of each other and a couple read as
 very slightly slower than the row above. That is what an honest table of a long
