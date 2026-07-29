@@ -2,6 +2,8 @@ package mp3packer
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,9 +37,25 @@ func read(t testing.TB, path string) []byte {
 // which is the property a lossless repack has to preserve.
 func spectra(t *testing.T, data []byte) []huffman.Spectrum {
 	t.Helper()
-	f, err := mp3.Parse(data)
+	out, err := decodeSpectra(data)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return out
+}
+
+// errNotSelfContained reports a granule whose coding runs past the length it
+// declares. Nothing can be asserted about repacking such a granule; see the
+// comment at the check itself.
+var errNotSelfContained = errors.New("granule reads past part2_3_length")
+
+// decodeSpectra is spectra without the test dependency: a granule that does not
+// decode is an error rather than a failure, which is what the fuzz target needs
+// — arbitrary bytes not decoding is the expected outcome, not a bug.
+func decodeSpectra(data []byte) ([]huffman.Spectrum, error) {
+	f, err := mp3.Parse(data)
+	if err != nil {
+		return nil, err
 	}
 	var pool []byte
 	starts := make([]int, len(f.Frames))
@@ -51,26 +69,48 @@ func spectra(t *testing.T, data []byte) []huffman.Spectrum {
 		h := fr.Header
 		from := starts[i] - fr.SideInfo.MainDataBegin
 		if from < 0 {
-			t.Fatalf("frame %d points before the start of the file", i)
+			return nil, fmt.Errorf("frame %d points before the start of the file", i)
 		}
-		r := bitio.NewReader(pool)
-		r.Seek(from * 8)
+		pos := from * 8
 		for gr := 0; gr < h.Granules(); gr++ {
 			for ch := 0; ch < h.Channels(); ch++ {
 				g := fr.SideInfo.Gr[gr][ch]
-				start := r.Tell()
 				sf := mp3.ScalefactorBits(h, fr.SideInfo, gr, ch)
+
+				// Decode from a copy of exactly the bits the granule declares,
+				// which a Reader zero-fills past the end of. A codeword is read
+				// whole once it has started, so one that straddles
+				// part2_3_length would otherwise pull in whatever follows the
+				// granule — and what follows is ancillary data, which a repack
+				// is free to drop. Two files that decode to the same audio can
+				// differ there, so reading it would make this compare something
+				// that is not the audio.
+				src := bitio.NewReader(pool)
+				src.Seek(pos)
+				buf := bitio.NewWriterSize((g.Part23Length + 7) / 8)
+				buf.Copy(src, g.Part23Length)
+				r := bitio.NewReader(buf.Bytes())
+
 				r.Skip(sf)
 				cfg := granuleConfig(g)
 				if !huffman.Decode(&s, cfg, r, h.SampleRate, g.Part23Length-sf) {
-					t.Fatalf("frame %d granule %d/%d did not decode", i, gr, ch)
+					return nil, fmt.Errorf("frame %d granule %d/%d did not decode", i, gr, ch)
+				}
+				if r.Tell() > g.Part23Length {
+					// A codeword that begins inside the granule and ends outside
+					// it makes the granule's own audio depend on bytes that are
+					// not part of it. No encoder produces that and a repack
+					// cannot promise anything about it, since those bytes are
+					// ancillary data or another frame's reservoir.
+					return nil, fmt.Errorf("frame %d granule %d/%d reads %d bits past its %d: %w",
+						i, gr, ch, r.Tell()-g.Part23Length, g.Part23Length, errNotSelfContained)
 				}
 				out = append(out, s)
-				r.Seek(start + g.Part23Length)
+				pos += g.Part23Length
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func TestProcessIsLossless(t *testing.T) {

@@ -597,6 +597,43 @@ On top of that, `go test ./...`:
   information block of the test files;
 - verifies that repacking a repacked file changes nothing.
 
+`FuzzProcess` drives the whole repack from arbitrary bytes, since `Process` is an
+exported entry point taking untrusted input and the code that indexes its way
+through it moves in most commits. Refusing an input is always allowed; panicking
+is not, nor is returning success beside something that will not parse.
+
+It found a real fault on its first run, and in the parser rather than the packer.
+`findSync` would only lock onto a run of fewer than three frames within 64 bytes
+of the end of the data, but a frame is 26 bytes at the bottom of MPEG-2 and 1440
+at the top of MPEG-1, so a lone frame bigger than that window could not be found
+at all — and layout grows a frame whose payload needs the room. A 27-byte frame
+declaring 3442 bits came back out as a perfectly good 470-byte one that our own
+parser then rejected. Room is now measured by scoring each candidate rather than
+against a fixed count of bytes: a longer chain wins, a chain that fits in the
+data beats one that overruns it, and between two that fit, the one leaving less
+of the file unexplained wins. A real file still returns at its first candidate,
+so nothing about the normal path changed.
+
+Three of the target's own assertions turned out to be wrong rather than the code,
+and telling those apart from faults was most of the work:
+
+- A leading Xing/Info frame is copied byte for byte, so `-no-crc` does not reach
+  it and it keeps whatever CRC it arrived with.
+- Junk has to be checked against the output bytes, not against a re-parse of
+  them. Parsing is a search, and where the junk holds something that reads as a
+  frame header the result has two readings; the repack changes which one scores
+  best by changing the length and position of what follows. No encoder produces
+  such a file and the fuzzer produces little else.
+- A codeword is read whole once it has started, so one straddling
+  `part2_3_length` pulls in the bytes after the granule — which are ancillary
+  data, which a repack is free to drop, and does. Comparing decoded spectra had
+  to stop reading there, or two files that decode to the same audio compare as
+  different. A granule needing those bytes is reported as such, and our own
+  output is held to never being one.
+
+Run it with `go test -fuzz FuzzProcess`. The saved crashers under
+`testdata/fuzz/` are regression seeds and run as part of the ordinary suite.
+
 `BenchmarkOptimizeGranule`, `BenchmarkDecodeGranule` and `BenchmarkEncodeGranule`
 time the three halves of the work over a fixed spread of granules. The end-to-end
 benchmarks cannot say which of the three a change moved without a profile, which
