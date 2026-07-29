@@ -43,6 +43,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -164,9 +165,19 @@ type results struct {
 	Fingerprint fingerprint       `json:"fingerprint"`
 	InputPrints map[string]string `json:"inputFingerprints"`
 	Tolerance   float64           `json:"tolerance"`
-	Inputs      []input           `json:"inputs"`
-	Tables      []table           `json:"tables"`
-	Steps       []stepResult      `json:"steps"`
+	MinRounds   int               `json:"minRounds"`
+
+	// Session numbers every invocation, because the machine is not the same from
+	// one to the next. Between two sittings the whole history moved 7% on this
+	// one, which is larger than most of the steps in the tables, so a median
+	// mixed across sittings compares a change against the weather. Topping up a
+	// cell cheaply is still worth having while iterating; what it cannot do is
+	// produce a publishable table, and inject enforces that rather than trusting
+	// whoever runs it to remember.
+	Session int          `json:"session"`
+	Inputs  []input      `json:"inputs"`
+	Tables  []table      `json:"tables"`
+	Steps   []stepResult `json:"steps"`
 }
 
 type stepResult struct {
@@ -174,7 +185,52 @@ type stepResult struct {
 	Label  string               `json:"label"`
 	Tables []string             `json:"tables"`
 	Skip   string               `json:"skip,omitempty"` // why this step has no numbers
-	NsPer  map[string][]float64 `json:"nsPerOp,omitempty"`
+	Cells  map[string]*cellRuns `json:"cells,omitempty"`
+
+	// Legacy is what this file used to hold: runs with no record of when they
+	// were taken. Read once, to migrate, and never written.
+	Legacy map[string][]float64 `json:"nsPerOp,omitempty"`
+}
+
+// cellRuns is one step measured on one input. The two slices run in step: Ns[i]
+// was taken in session Session[i].
+type cellRuns struct {
+	Ns      []float64 `json:"ns"`
+	Session []int     `json:"session"`
+}
+
+func (c *cellRuns) add(ns float64, session int) {
+	c.Ns = append(c.Ns, ns)
+	c.Session = append(c.Session, session)
+}
+
+// inSession returns the runs taken in one session, or all of them for session 0.
+func (c *cellRuns) inSession(session int) []float64 {
+	if c == nil {
+		return nil
+	}
+	if session == 0 {
+		return c.Ns
+	}
+	var out []float64
+	for i, v := range c.Ns {
+		if i < len(c.Session) && c.Session[i] == session {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// sessions lists every session this cell holds runs from.
+func (c *cellRuns) sessions() map[int]int {
+	n := map[int]int{}
+	if c == nil {
+		return n
+	}
+	for _, s := range c.Session {
+		n[s]++
+	}
+	return n
 }
 
 func main() {
@@ -206,6 +262,7 @@ func runCmd(args []string) error {
 	maxRounds := fs.Int("max-rounds", 250, "runs after which a cell is left unsettled; 0 for no limit")
 	tol := fs.Float64("tolerance", 0.0075, "settled when the median's standard error is under this fraction of it")
 	force := fs.Bool("force", false, "discard cached runs and measure from scratch")
+	sweep := fs.Bool("sweep", false, "measure every cell in this session, which is what inject requires")
 	adopt := fs.Bool("adopt", false, "accept a cache that carries no fingerprint as this machine's")
 	work := fs.String("work", "", "directory for worktrees (default: a temporary one)")
 	if err := fs.Parse(args); err != nil {
@@ -242,6 +299,15 @@ func runCmd(args []string) error {
 	fp := takeFingerprint()
 	out := loadCache(*outPath, fp, prints, *force, *adopt)
 	out.Fingerprint, out.InputPrints, out.Tolerance = fp, prints, *tol
+	out.MinRounds = *minRounds
+	out.Session++
+	session := out.Session
+	if *sweep {
+		fmt.Fprintf(os.Stderr, "session %d, sweeping every cell\n", session)
+	} else {
+		fmt.Fprintf(os.Stderr, "session %d, topping up unsettled cells only "+
+			"(inject needs -sweep)\n", session)
+	}
 	out.Inputs, out.Tables = cfg.Inputs, cfg.Tables
 
 	// Carry forward whatever the cache already holds for each configured step,
@@ -251,10 +317,10 @@ func runCmd(args []string) error {
 	for _, s := range cfg.Steps {
 		res := stepResult{Commit: s.Commit, Label: s.Label, Tables: s.Tables}
 		if i := slices.IndexFunc(out.Steps, func(o stepResult) bool { return o.Commit == s.Commit }); i >= 0 {
-			res.NsPer = out.Steps[i].NsPer
+			res.Cells = out.Steps[i].Cells
 		}
-		if res.NsPer == nil {
-			res.NsPer = map[string][]float64{}
+		if res.Cells == nil {
+			res.Cells = map[string]*cellRuns{}
 		}
 		steps = append(steps, res)
 	}
@@ -279,11 +345,19 @@ func runCmd(args []string) error {
 				if !slices.Contains(out.Steps[i].Tables, tableOf(cfg, in.ID)) {
 					continue
 				}
-				runs := out.Steps[i].NsPer[in.ID]
-				if *maxRounds > 0 && len(runs) >= *maxRounds {
+				// Topping up judges a cell by every run it has, which is what
+				// makes it cheap. A sweep judges it by this session's runs
+				// alone, so every cell is measured again and the table it
+				// produces is internally comparable.
+				have := out.Steps[i].Cells[in.ID]
+				judge := have.inSession(0) // every run it has
+				if *sweep {
+					judge = have.inSession(session)
+				}
+				if *maxRounds > 0 && len(judge) >= *maxRounds {
 					continue // given up on; see the run limit in provenance
 				}
-				if settled(runs, tolFor(in, *tol), *minRounds) {
+				if settled(judge, tolFor(in, *tol), *minRounds) {
 					continue
 				}
 				c = append(c, cell{i, in})
@@ -358,8 +432,14 @@ func runCmd(args []string) error {
 				s.Skip = err.Error()
 				continue
 			}
-			s.NsPer[c.input.ID] = append(s.NsPer[c.input.ID], ns)
-			runs := s.NsPer[c.input.ID]
+			if s.Cells[c.input.ID] == nil {
+				s.Cells[c.input.ID] = &cellRuns{}
+			}
+			s.Cells[c.input.ID].add(ns, session)
+			runs := s.Cells[c.input.ID].Ns
+			if *sweep {
+				runs = s.Cells[c.input.ID].inSession(session)
+			}
 			fmt.Fprintf(os.Stderr, "%-8s %-8s %8.2f ms  n=%-3d se=%.2f%% (target %.2f%%)\n",
 				s.Commit, c.input.ID, ns/1e6, len(runs), 100*relSE(runs), 100*tolFor(c.input, *tol))
 		}
@@ -399,6 +479,22 @@ func loadCache(path string, fp fingerprint, prints map[string]string, force, ado
 			old.InputPrints[id] = prints[id]
 		}
 	}
+	// Runs from before sessions were recorded become session 0, which inject
+	// treats as "no session" and so will not publish. They are kept because they
+	// are still worth topping up from, not because they can be trusted together.
+	for i := range old.Steps {
+		if len(old.Steps[i].Legacy) == 0 {
+			continue
+		}
+		if old.Steps[i].Cells == nil {
+			old.Steps[i].Cells = map[string]*cellRuns{}
+		}
+		for id, ns := range old.Steps[i].Legacy {
+			c := &cellRuns{Ns: ns, Session: make([]int, len(ns))}
+			old.Steps[i].Cells[id] = c
+		}
+		old.Steps[i].Legacy = nil
+	}
 	if diff := fingerprintDiff(old.Fingerprint, fp); diff != "" {
 		fmt.Fprintf(os.Stderr, "discarding cached runs: %s\n", diff)
 		return results{}
@@ -407,7 +503,7 @@ func loadCache(path string, fp fingerprint, prints map[string]string, force, ado
 		if got, ok := old.InputPrints[id]; ok && got != want {
 			fmt.Fprintf(os.Stderr, "discarding cached runs for input %q: it or its settings changed\n", id)
 			for i := range old.Steps {
-				delete(old.Steps[i].NsPer, id)
+				delete(old.Steps[i].Cells, id)
 			}
 		}
 	}
@@ -596,7 +692,7 @@ func injectCmd(args []string) error {
 	for _, c := range cfg.Steps {
 		sr := stepResult{Commit: c.Commit, Label: c.Label, Tables: c.Tables}
 		if i := slices.IndexFunc(res.Steps, func(o stepResult) bool { return o.Commit == c.Commit }); i >= 0 {
-			sr.NsPer = res.Steps[i].NsPer
+			sr.Cells = res.Steps[i].Cells
 		}
 		steps = append(steps, sr)
 	}
@@ -606,6 +702,12 @@ func injectCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	session, err := publishable(res)
+	if err != nil {
+		return err
+	}
+	res.Session = session
+
 	text := string(body)
 	for _, t := range res.Tables {
 		rendered, err := render(res, t)
@@ -635,7 +737,11 @@ func provenance(res results) string {
 		tol[in.ID] = tolFor(in, res.Tolerance)
 	}
 	for _, s := range res.Steps {
-		for id, runs := range s.NsPer {
+		for id, cell := range s.Cells {
+			runs := cell.inSession(res.Session)
+			if len(runs) == 0 {
+				continue
+			}
 			lo, hi = min(lo, len(runs)), max(hi, len(runs))
 			if relSE(runs) > tol[id] {
 				unsettled++
@@ -668,6 +774,71 @@ func provenance(res results) string {
 	return s
 }
 
+// publishable returns the newest session that measured every cell of every table
+// enough times to be quoted, and refuses if there is none.
+//
+// This is the whole reason sessions are recorded. Topping up leaves a file whose
+// cells were measured at different times, and the machine is not the same from
+// one time to the next — enough to invent a 3% step or hide one. Rather than
+// warn, which is easy to skip past, inject will not write a table it cannot draw
+// from a single session.
+func publishable(res results) (int, error) {
+	type missing struct {
+		commit, input string
+		have          int
+	}
+	// A file written before sessions were recorded has neither, and nothing in it
+	// can be published; say so plainly rather than through a count of zero.
+	if res.Session < 1 {
+		return 0, errors.New("this file predates session recording, so none of its runs can be " +
+			"placed in time and no table from it would be internally comparable; run with -sweep")
+	}
+	if res.MinRounds < 1 {
+		res.MinRounds = 5
+	}
+	best := -1
+	var why []missing
+	for session := res.Session; session >= 1; session-- {
+		var gaps []missing
+		for _, s := range res.Steps {
+			for _, t := range res.Tables {
+				if !slices.Contains(s.Tables, t.ID) {
+					continue
+				}
+				for _, c := range t.Columns {
+					if !slices.ContainsFunc(res.Inputs, func(in input) bool { return in.ID == c.Input }) {
+						continue
+					}
+					n := len(s.Cells[c.Input].inSession(session))
+					if n < res.MinRounds {
+						gaps = append(gaps, missing{s.Commit, c.Input, n})
+					}
+				}
+			}
+		}
+		if len(gaps) == 0 {
+			best = session
+			break
+		}
+		if why == nil {
+			why = gaps
+		}
+	}
+	if best < 0 {
+		msg := fmt.Sprintf("no session has measured every cell at least %d times, so no table here "+
+			"would be internally comparable; run with -sweep", res.MinRounds)
+		for i, m := range why {
+			if i == 3 {
+				msg += fmt.Sprintf("\n  ... and %d more", len(why)-3)
+				break
+			}
+			msg += fmt.Sprintf("\n  %s/%s has %d in the newest session", m.commit, m.input, m.have)
+		}
+		return 0, errors.New(msg)
+	}
+	return best, nil
+}
+
 func render(res results, t table) (string, error) {
 	var b strings.Builder
 	b.WriteString("|")
@@ -687,7 +858,7 @@ func render(res results, t table) (string, error) {
 		cells := make([]string, len(t.Columns))
 		any := false
 		for i, c := range t.Columns {
-			runs := s.NsPer[c.Input]
+			runs := s.Cells[c.Input].inSession(res.Session)
 			if len(runs) == 0 {
 				cells[i] = "—"
 				continue

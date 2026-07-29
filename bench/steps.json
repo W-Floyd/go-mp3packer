@@ -189,6 +189,22 @@
         "steps-short",
         "steps-long"
       ]
+    },
+    {
+      "commit": "212628e",
+      "label": "frame CRC folded four bytes at a time",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "f49523a",
+      "label": "frame data read from the reservoir in place",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
     }
   ]
 }
