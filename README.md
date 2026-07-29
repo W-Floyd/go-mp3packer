@@ -61,29 +61,35 @@ exported and usable on their own:
 
 ## What it saves
 
-Eight seconds of test audio, encoded by LAME, then repacked:
+The test corpus repacked, sizes in bytes. `-n` is layout only; the default column
+is the full search, the `-z` equivalent:
 
-| file | input | `-n` (layout only) | default (`-z` equivalent) |
-| --- | --- | --- | --- |
-| VBR, joint stereo | 180098 | 179708 | 179295 |
-| CBR 192 | 193723 | 193149 | 193102 |
-| CBR 320 | 322872 | 322142 | 322139 |
-| CBR 320, quiet audio | 322872 | 322142 | 288542 |
-| VBR mono | 129148 | 128580 | 128583 |
-| MPEG-2, 22050 Hz | 96484 | 96391 | 96388 |
-| VBR with ID3v2 tags | 49523 | 49081 | 48365 |
+<!-- comparison:savings -->
+| file              |                                      |  input |   `-n` | default |  saved |
+|:------------------|:-------------------------------------|-------:|-------:|--------:|-------:|
+| bench-vbr.mp3     | VBR, joint stereo, 44100 Hz          | 180098 | 179708 |  179295 |  0.45% |
+| cbr-crc.mp3       | CBR 128, joint stereo, 44100 Hz, CRC |  20061 |  19914 |   19760 |  1.50% |
+| cbr320-quiet.mp3  | CBR 320, joint stereo, 44100 Hz      | 322872 | 288541 |  288542 | 10.63% |
+| cbr320-stereo.mp3 | CBR 320, stereo, 44100 Hz            |  50154 |  49903 |   49903 |  0.50% |
+| lsf-22050.mp3     | VBR, joint stereo, 22050 Hz, MPEG2   |  15806 |  15599 |   15547 |  1.64% |
+| vbr-joint.mp3     | VBR, joint stereo, 44100 Hz          |  28074 |  27866 |   27658 |  1.48% |
+| vbr-mono.mp3      | VBR, mono, 44100 Hz                  |  10510 |  10093 |    9989 |  4.96% |
+<!-- /comparison:savings -->
 
 Typical savings on real encodes run from a few tenths of a percent to a few
 percent; files whose bitrate is far above what the audio needs — CBR 320 of quiet
 material being the extreme case — lose much more. Whether any of that is worth
 the rewrite is your call.
 
-Two rows deserve a note. Recompression is not the whole story: `-n` alone removes
-padding, which is why it gets most of the way on dense files. And on the mono row
-the layout-only output is three bytes *smaller*, because once every frame has
-already shrunk to the minimum frame size, the space freed up by better
-compression cannot be given back — it becomes padding, and the reservoir bookkeeping
-can spend a byte or two more of it.
+Recompression is not the whole story: `-n` alone removes padding, which is why it
+gets most of the way on the dense files by itself.
+
+The quiet CBR 320 row is worth a second look, where layout only comes out a byte
+*smaller* than the full search. Once every frame has shrunk to the minimum the
+format allows, space freed by better compression cannot be given back — it becomes
+padding instead, and the reservoir bookkeeping can spend a byte more of it than it
+saves. Compression and file size are not the same axis; `TestRecompressBeatsLayoutOnly`
+insists on the payload shrinking rather than the file.
 
 ## Compared with the C++ port
 
@@ -105,16 +111,16 @@ On speed we are ahead where it counts. Every test file, both invoked as commands
 with every core available, on an Apple M4 Max:
 
 <!-- comparison:comparison-files -->
-| file | size | ours | reference | |
-| --- | --- | --- | --- | --- |
-| bench-vbr.mp3 | 180 kB | 4.62 ms | 23.3 ms | 5.0× |
-| cbr-crc.mp3 | 20 kB | 3.67 ms | 6.87 ms | 1.9× |
-| cbr320-quiet.mp3 | 322 kB | 4.72 ms | 8.49 ms | 1.8× |
-| cbr320-stereo.mp3 | 50 kB | 3.48 ms | 3.35 ms | 1.0× |
-| lsf-22050.mp3 | 15 kB | 3.42 ms | 2.59 ms | 0.8× |
-| vbr-joint.mp3 | 28 kB | 3.59 ms | 6.04 ms | 1.7× |
-| vbr-mono.mp3 | 10 kB | 3.73 ms | 5.12 ms | 1.4× |
-| bards-tale.mp3 | 3810 kB | 24.3 ms | 199 ms | 8.2× |
+| file              |    size |    ours | reference |      |
+|:------------------|--------:|--------:|----------:|-----:|
+| bench-vbr.mp3     |  180 kB | 4.89 ms |   22.6 ms | 4.6× |
+| cbr-crc.mp3       |   20 kB | 3.30 ms |   6.60 ms | 2.0× |
+| cbr320-quiet.mp3  |  322 kB | 4.38 ms |   7.95 ms | 1.8× |
+| cbr320-stereo.mp3 |   50 kB | 3.47 ms |   3.39 ms | 1.0× |
+| lsf-22050.mp3     |   15 kB | 3.39 ms |   2.42 ms | 0.7× |
+| vbr-joint.mp3     |   28 kB | 3.38 ms |   5.75 ms | 1.7× |
+| vbr-mono.mp3      |   10 kB | 3.32 ms |   4.62 ms | 1.4× |
+| bards-tale.mp3    | 3810 kB | 23.3 ms |    197 ms | 8.5× |
 <!-- /comparison:comparison-files -->
 
 Two things in there are worth reading rather than skipping. The ratio collapses as
@@ -126,12 +132,12 @@ declines to recompress MPEG-2 at all, so it is not doing the same job.
 Across worker counts, on the longest file to hand:
 
 <!-- comparison:comparison-threads -->
-| threads | ours | reference | |
-| --- | --- | --- | --- |
-| 1 | 195 ms | 2224 ms | 11.4× |
-| 2 | 104 ms | 1155 ms | 11.1× |
-| 4 | 56.8 ms | 594 ms | 10.5× |
-| all | 24.3 ms | 199 ms | 8.2× |
+| threads |    ours | reference |       |
+|--------:|--------:|----------:|------:|
+|       1 |  186 ms |   2211 ms | 11.9× |
+|       2 |  101 ms |   1150 ms | 11.4× |
+|       4 | 57.2 ms |    591 ms | 10.3× |
+|     all | 23.3 ms |    197 ms |  8.5× |
 <!-- /comparison:comparison-threads -->
 
 Our lead is largest on one worker and narrows as cores are added, because the

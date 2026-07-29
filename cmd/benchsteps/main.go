@@ -40,6 +40,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -58,6 +59,10 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 // measurementVersion is bumped by hand when a change here alters what a run
@@ -1379,35 +1384,28 @@ func publishable(res results) (int, error) {
 	return best, nil
 }
 
+// render lays a table out as markdown. Every column but the first holds a number
+// or a step, so every column but the first is right-aligned, and markdown carries
+// that through to whatever renders the file.
 func render(res results, t table) (string, error) {
-	tol := map[string]float64{}
-	for _, in := range res.Inputs {
-		tol[in.ID] = tolFor(in, res.Tolerance)
-	}
-
-	var b strings.Builder
-	b.WriteString("|")
+	header := []string{""}
+	align := []tw.Align{tw.AlignLeft}
 	for _, c := range t.Columns {
-		b.WriteString(" | " + c.Header)
+		header = append(header, c.Header)
+		align = append(align, tw.AlignRight)
 		if c.Delta {
-			b.WriteString(" | Δ")
+			header = append(header, "Δ")
+			align = append(align, tw.AlignRight)
 		}
 	}
-	b.WriteString(" |\n| ---")
-	for _, c := range t.Columns {
-		b.WriteString(" | ---")
-		if c.Delta {
-			b.WriteString(" | ---")
-		}
-	}
-	b.WriteString(" |\n")
 
+	var rows [][]string
 	prev := map[string]*cellRuns{}
 	for _, s := range res.Steps {
 		if !slices.Contains(s.Tables, t.ID) {
 			continue
 		}
-		var cells []string
+		cells := []string{s.Label}
 		any := false
 		for _, c := range t.Columns {
 			runs := s.Cells[c.Input].inSession(res.Session)
@@ -1428,9 +1426,30 @@ func render(res results, t table) (string, error) {
 		if !any {
 			continue // nothing measured for this row; leave it out rather than imply a gap
 		}
-		b.WriteString("| " + s.Label + " | " + strings.Join(cells, " | ") + " |\n")
+		rows = append(rows, cells)
 	}
-	return b.String(), nil
+
+	var buf bytes.Buffer
+	cell := tw.CellConfig{Alignment: tw.CellAlignment{PerColumn: align}}
+	tbl := tablewriter.NewTable(&buf,
+		tablewriter.WithRenderer(renderer.NewMarkdown()),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{AutoFormat: tw.Off},
+				Alignment:  cell.Alignment,
+			},
+			Row: cell,
+		}))
+	tbl.Header(header)
+	for _, r := range rows {
+		if err := tbl.Append(r); err != nil {
+			return "", err
+		}
+	}
+	if err := tbl.Render(); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // An increase was once held to twice the evidence of a decrease, on two

@@ -21,28 +21,28 @@ Repacking an 8-second VBR file, one worker, so the numbers reflect the search
 itself rather than the core count:
 
 <!-- benchsteps:steps-short -->
-| | ms | Δ |
-| --- | --- | --- |
-| first working version | 187 | — |
-| NEON / SSE2 kernels | 38.9 | −79.3% |
-| tail costs batched, decode by table lookup | 22.9 | −41.1% |
-| region search reduced to arithmetic | 18.3 | −20.1% |
-| count1 quadruples and pair signs branchless | 17.3 | −5.2% |
-| preallocation, encoder invariants hoisted | 16.4 | −5.4% |
-| AVX2 path for the cost kernels | 16.5 | ≈ |
-| bit window's tail read from a pad | 16.1 | −2.0% |
-| AVX2 tail reduction batched four rows | 16.1 | ≈ |
-| coder's state kept out of memory | 15.1 | −6.3% |
-| memoised region costs not called per candidate | 14.6 | −2.8% |
-| prefix covers batched | 14.2 | −3.0% |
-| before the frame CRC was folded | 14.1 | ≈ |
-| frame CRC folded a byte at a time | 14.1 | ≈ |
-| window-switched geometry in its own loop | 14.1 | ≈ |
-| encoder's accumulator held in registers | 13.5 | −4.4% |
-| reservoir described rather than built | 13.7 | +1.4% |
-| side info written into the frame | 13.7 | ≈ |
-| frame CRC folded four bytes at a time | 13.6 | ≈ |
-| frame data read from the reservoir in place | 13.7 | ≈ |
+|                                                |   ms |      Δ |
+|:-----------------------------------------------|-----:|-------:|
+| first working version                          |  187 |      — |
+| NEON / SSE2 kernels                            | 38.9 | −79.3% |
+| tail costs batched, decode by table lookup     | 22.9 | −41.1% |
+| region search reduced to arithmetic            | 18.3 | −20.1% |
+| count1 quadruples and pair signs branchless    | 17.3 |  −5.2% |
+| preallocation, encoder invariants hoisted      | 16.4 |  −5.4% |
+| AVX2 path for the cost kernels                 | 16.5 |      ≈ |
+| bit window's tail read from a pad              | 16.1 |  −2.0% |
+| AVX2 tail reduction batched four rows          | 16.1 |      ≈ |
+| coder's state kept out of memory               | 15.1 |  −6.3% |
+| memoised region costs not called per candidate | 14.6 |  −2.8% |
+| prefix covers batched                          | 14.2 |  −3.0% |
+| before the frame CRC was folded                | 14.1 |      ≈ |
+| frame CRC folded a byte at a time              | 14.1 |      ≈ |
+| window-switched geometry in its own loop       | 14.1 |      ≈ |
+| encoder's accumulator held in registers        | 13.5 |  −4.4% |
+| reservoir described rather than built          | 13.7 |  +1.4% |
+| side info written into the frame               | 13.7 |      ≈ |
+| frame CRC folded four bytes at a time          | 13.6 |      ≈ |
+| frame data read from the reservoir in place    | 13.7 |      ≈ |
 <!-- /benchsteps:steps-short -->
 
 One row per commit, which is as fine as the history goes: the first release was
@@ -54,28 +54,28 @@ everything parsing and layout do scales with the frame count. The same steps on
 two and a half minutes of real music, 6071 frames:
 
 <!-- benchsteps:steps-long -->
-| | one worker, ms | Δ | all cores, ms | Δ |
-| --- | --- | --- | --- | --- |
-| first working version | 2118 | — | 189 | — |
-| NEON / SSE2 kernels | 493 | −76.7% | 50.9 | −73.0% |
-| tail costs batched, decode by table lookup | 310 | −37.1% | 35.1 | −31.0% |
-| region search reduced to arithmetic | 264 | −14.8% | 29.2 | −16.9% |
-| count1 quadruples and pair signs branchless | 260 | −1.6% | 28.8 | ≈ |
-| preallocation, encoder invariants hoisted | 247 | −4.9% | 26.9 | −6.7% |
-| AVX2 path for the cost kernels | 246 | ≈ | 26.6 | −1.0% |
-| bit window's tail read from a pad | 238 | −3.0% | 25.4 | −4.4% |
-| AVX2 tail reduction batched four rows | 239 | ≈ | 25.5 | ≈ |
-| coder's state kept out of memory | 221 | −7.6% | 24.1 | −5.5% |
-| memoised region costs not called per candidate | 217 | −1.5% | 23.9 | −0.9% |
-| prefix covers batched | 210 | −3.2% | 23.4 | −2.0% |
-| before the frame CRC was folded | 210 | ≈ | 23.5 | ≈ |
-| frame CRC folded a byte at a time | 206 | −1.9% | 19.2 | −18.3% |
-| window-switched geometry in its own loop | 205 | ≈ | 19.1 | ≈ |
-| encoder's accumulator held in registers | 196 | −4.4% | 18.5 | −3.4% |
-| reservoir described rather than built | 198 | ≈ | 18.2 | −1.4% |
-| side info written into the frame | 197 | ≈ | 18.1 | −0.5% |
-| frame CRC folded four bytes at a time | 196 | ≈ | 17.7 | −2.2% |
-| frame data read from the reservoir in place | 197 | ≈ | 17.9 | +0.8% |
+|                                                | one worker, ms |      Δ | all cores, ms |      Δ |
+|:-----------------------------------------------|---------------:|-------:|--------------:|-------:|
+| first working version                          |           2118 |      — |           189 |      — |
+| NEON / SSE2 kernels                            |            493 | −76.7% |          50.9 | −73.0% |
+| tail costs batched, decode by table lookup     |            310 | −37.1% |          35.1 | −31.0% |
+| region search reduced to arithmetic            |            264 | −14.8% |          29.2 | −16.9% |
+| count1 quadruples and pair signs branchless    |            260 |  −1.6% |          28.8 |      ≈ |
+| preallocation, encoder invariants hoisted      |            247 |  −4.9% |          26.9 |  −6.7% |
+| AVX2 path for the cost kernels                 |            246 |      ≈ |          26.6 |  −1.0% |
+| bit window's tail read from a pad              |            238 |  −3.0% |          25.4 |  −4.4% |
+| AVX2 tail reduction batched four rows          |            239 |      ≈ |          25.5 |      ≈ |
+| coder's state kept out of memory               |            221 |  −7.6% |          24.1 |  −5.5% |
+| memoised region costs not called per candidate |            217 |  −1.5% |          23.9 |  −0.9% |
+| prefix covers batched                          |            210 |  −3.2% |          23.4 |  −2.0% |
+| before the frame CRC was folded                |            210 |      ≈ |          23.5 |      ≈ |
+| frame CRC folded a byte at a time              |            206 |  −1.9% |          19.2 | −18.3% |
+| window-switched geometry in its own loop       |            205 |      ≈ |          19.1 |      ≈ |
+| encoder's accumulator held in registers        |            196 |  −4.4% |          18.5 |  −3.4% |
+| reservoir described rather than built          |            198 |      ≈ |          18.2 |  −1.4% |
+| side info written into the frame               |            197 |      ≈ |          18.1 |  −0.5% |
+| frame CRC folded four bytes at a time          |            196 |      ≈ |          17.7 |  −2.2% |
+| frame data read from the reservoir in place    |            197 |      ≈ |          17.9 |  +0.8% |
 <!-- /benchsteps:steps-long -->
 
 End to end that is 2118 ms down to 197 on one worker, and 189 to 17.9 across
@@ -117,28 +117,28 @@ leaving parsing and laying the frames back out — the two stages no number of
 workers can share, and the two that the allocation work was aimed at:
 
 <!-- benchsteps:steps-serial -->
-| | serial path, ms | Δ |
-| --- | --- | --- |
-| first working version | 12.6 | — |
-| NEON / SSE2 kernels | 12.6 | ≈ |
-| tail costs batched, decode by table lookup | 12.5 | ≈ |
-| region search reduced to arithmetic | 9.98 | −20.4% |
-| count1 quadruples and pair signs branchless | 9.82 | −1.6% |
-| preallocation, encoder invariants hoisted | 7.92 | −19.4% |
-| AVX2 path for the cost kernels | 8.19 | +3.4% |
-| bit window's tail read from a pad | 7.48 | −8.6% |
-| AVX2 tail reduction batched four rows | 7.47 | ≈ |
-| coder's state kept out of memory | 7.60 | +1.7% |
-| memoised region costs not called per candidate | 7.45 | −2.0% |
-| prefix covers batched | 7.44 | ≈ |
-| before the frame CRC was folded | 7.48 | ≈ |
-| frame CRC folded a byte at a time | 3.43 | −54.1% |
-| window-switched geometry in its own loop | 3.41 | ≈ |
-| encoder's accumulator held in registers | 3.38 | ≈ |
-| reservoir described rather than built | 3.26 | −3.7% |
-| side info written into the frame | 2.90 | −10.9% |
-| frame CRC folded four bytes at a time | 2.61 | −10.4% |
-| frame data read from the reservoir in place | 2.31 | −11.4% |
+|                                                | serial path, ms |      Δ |
+|:-----------------------------------------------|----------------:|-------:|
+| first working version                          |            12.6 |      — |
+| NEON / SSE2 kernels                            |            12.6 |      ≈ |
+| tail costs batched, decode by table lookup     |            12.5 |      ≈ |
+| region search reduced to arithmetic            |            9.98 | −20.4% |
+| count1 quadruples and pair signs branchless    |            9.82 |  −1.6% |
+| preallocation, encoder invariants hoisted      |            7.92 | −19.4% |
+| AVX2 path for the cost kernels                 |            8.19 |  +3.4% |
+| bit window's tail read from a pad              |            7.48 |  −8.6% |
+| AVX2 tail reduction batched four rows          |            7.47 |      ≈ |
+| coder's state kept out of memory               |            7.60 |  +1.7% |
+| memoised region costs not called per candidate |            7.45 |  −2.0% |
+| prefix covers batched                          |            7.44 |      ≈ |
+| before the frame CRC was folded                |            7.48 |      ≈ |
+| frame CRC folded a byte at a time              |            3.43 | −54.1% |
+| window-switched geometry in its own loop       |            3.41 |      ≈ |
+| encoder's accumulator held in registers        |            3.38 |      ≈ |
+| reservoir described rather than built          |            3.26 |  −3.7% |
+| side info written into the frame               |            2.90 | −10.9% |
+| frame CRC folded four bytes at a time          |            2.61 | −10.4% |
+| frame data read from the reservoir in place    |            2.31 | −11.4% |
 <!-- /benchsteps:steps-serial -->
 
 This is the column that resolves them, and it exists because asserting them from

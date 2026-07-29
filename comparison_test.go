@@ -1,6 +1,7 @@
 package mp3packer
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -11,10 +12,50 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/W-Floyd/go-mp3packer/mp3"
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
-var updateComparison = flag.Bool("update-comparison", false,
-	"rewrite the comparison tables in README.md from a fresh measurement")
+// markdownTable renders a table for the README. Columns are aligned by align,
+// which is also what markdown's own alignment row will say, so a column of
+// numbers lines up on its digits wherever the file is rendered.
+//
+// Header formatting is switched off: the default upper-cases them, which reads as
+// shouting in prose and loses the case of things like `-n`.
+func markdownTable(header []string, align []tw.Align, rows [][]string) string {
+	var buf bytes.Buffer
+	cfg := tw.CellConfig{Alignment: tw.CellAlignment{PerColumn: align}}
+	t := tablewriter.NewTable(&buf,
+		tablewriter.WithRenderer(renderer.NewMarkdown()),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{AutoFormat: tw.Off},
+				Alignment:  cfg.Alignment,
+			},
+			Row: cfg,
+		}))
+	t.Header(header)
+	for _, r := range rows {
+		if err := t.Append(r); err != nil {
+			panic(err)
+		}
+	}
+	if err := t.Render(); err != nil {
+		panic(err)
+	}
+	return buf.String()
+}
+
+var (
+	alignL = tw.AlignLeft
+	alignR = tw.AlignRight
+)
+
+var updateReadme = flag.Bool("update-readme", false,
+	"rewrite the generated tables in README.md from a fresh measurement")
 
 // comparisonRuns is how many times each command is timed. The median of five is
 // steady enough for a table quoted to three figures, and the whole test stays
@@ -28,7 +69,7 @@ var comparisonThreads = []int{1, 2, 4, 0}
 
 // TestComparison times this implementation against the reference.
 //
-// Ordinarily it asserts the claim the README makes, and with -update-comparison it
+// Ordinarily it asserts the claim the README makes, and with -update-readme it
 // also rewrites the tables there, so those numbers are generated from a
 // measurement rather than typed in from one.
 //
@@ -89,32 +130,40 @@ func TestComparison(t *testing.T) {
 		}
 	}
 
-	if !*updateComparison {
-		t.Log("pass -update-comparison to rewrite the tables in README.md")
+	if !*updateReadme {
+		t.Log("pass -update-readme to rewrite the tables in README.md")
 		return
 	}
 
-	var files1, threads1 strings.Builder
-	files1.WriteString("| file | size | ours | reference | |\n| --- | --- | --- | --- | --- |\n")
+	byFile := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		fmt.Fprintf(&files1, "| %s | %d kB | %s ms | %s ms | %.1f× |\n",
-			r.file, r.bytes/1000, threeFigures(r.ourMs[0]), threeFigures(r.theirMs[0]),
-			r.theirMs[0]/r.ourMs[0])
+		byFile = append(byFile, []string{
+			r.file, fmt.Sprintf("%d kB", r.bytes/1000),
+			threeFigures(r.ourMs[0]) + " ms", threeFigures(r.theirMs[0]) + " ms",
+			fmt.Sprintf("%.1f×", r.theirMs[0]/r.ourMs[0]),
+		})
 	}
+	filesTable := markdownTable(
+		[]string{"file", "size", "ours", "reference", ""},
+		[]tw.Align{alignL, alignR, alignR, alignR, alignR}, byFile)
 
 	// Thread scaling is shown on the longest file available: on a short one the
 	// fixed costs swamp what the workers are doing.
 	last := longest
-	threads1.WriteString("| threads | ours | reference | |\n| --- | --- | --- | --- |\n")
+	byThreads := make([][]string, 0, len(comparisonThreads))
 	for _, n := range comparisonThreads {
 		label := strconv.Itoa(n)
 		if n == 0 {
 			label = "all"
 		}
-		fmt.Fprintf(&threads1, "| %s | %s ms | %s ms | %.1f× |\n",
-			label, threeFigures(last.ourMs[n]), threeFigures(last.theirMs[n]),
-			last.theirMs[n]/last.ourMs[n])
+		byThreads = append(byThreads, []string{
+			label, threeFigures(last.ourMs[n]) + " ms", threeFigures(last.theirMs[n]) + " ms",
+			fmt.Sprintf("%.1f×", last.theirMs[n]/last.ourMs[n]),
+		})
 	}
+	threadsTable := markdownTable(
+		[]string{"threads", "ours", "reference", ""},
+		[]tw.Align{alignR, alignR, alignR, alignR}, byThreads)
 
 	body, err := os.ReadFile("README.md")
 	if err != nil {
@@ -122,8 +171,8 @@ func TestComparison(t *testing.T) {
 	}
 	text := string(body)
 	for _, b := range []struct{ id, table string }{
-		{"comparison-files", files1.String()},
-		{"comparison-threads", threads1.String()},
+		{"comparison-files", filesTable},
+		{"comparison-threads", threadsTable},
 	} {
 		text, err = replaceMarked(text, b.id, b.table)
 		if err != nil {
@@ -195,4 +244,86 @@ func replaceMarked(text, id, body string) (string, error) {
 		return "", fmt.Errorf("markers for %q not found in the document", id)
 	}
 	return text[:i+len(open)] + "\n" + body + text[j:], nil
+}
+
+// TestSavings writes the table of what a repack actually saves.
+//
+// It needs no reference implementation and no timing, the sizes being exact and
+// deterministic, so it regenerates from the corpus every time it is asked. The
+// table it replaced had been left behind by the corpus: of its seven input sizes
+// only two still matched a file in the repository, and it described three files
+// that no longer existed.
+//
+// Each row's description comes from the frames rather than from the file's name,
+// so a file cannot be mislabelled by renaming it.
+func TestSavings(t *testing.T) {
+	var rows [][]string
+	for _, path := range testFiles(t) {
+		in := read(t, path)
+		layout, _, err := Process(in, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		packed, _, err := Process(in, Options{Recompress: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(packed) > len(in) {
+			t.Errorf("%s grew: %d -> %d", filepath.Base(path), len(in), len(packed))
+		}
+		rows = append(rows, []string{
+			filepath.Base(path), describe(t, in),
+			strconv.Itoa(len(in)), strconv.Itoa(len(layout)), strconv.Itoa(len(packed)),
+			fmt.Sprintf("%.2f%%", 100*float64(len(in)-len(packed))/float64(len(in))),
+		})
+	}
+	table := markdownTable(
+		[]string{"file", "", "input", "`-n`", "default", "saved"},
+		[]tw.Align{alignL, alignL, alignR, alignR, alignR, alignR}, rows)
+
+	if !*updateReadme {
+		t.Log("pass -update-readme to rewrite the table in README.md")
+		return
+	}
+	body, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := replaceMarked(string(body), "savings", table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("README.md", []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// describe names a file by what its frames say it is: the MPEG version where it is
+// not the usual one, the bitrate if every frame shares it, and the channel mode.
+func describe(t *testing.T, data []byte) string {
+	t.Helper()
+	f, err := mp3.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := f.Frames[0].Header
+	rate := "VBR"
+	if slices.IndexFunc(f.Frames, func(fr mp3.Frame) bool {
+		return fr.Header.BitrateIndex != first.BitrateIndex
+	}) < 0 {
+		rate = fmt.Sprintf("CBR %d", first.Bitrate())
+	}
+	mode := map[mp3.ChannelMode]string{
+		mp3.Stereo: "stereo", mp3.JointStereo: "joint stereo",
+		mp3.DualChannel: "dual channel", mp3.Mono: "mono",
+	}[first.Mode]
+
+	parts := []string{rate, mode, fmt.Sprintf("%d Hz", first.SampleRate)}
+	if first.Version != mp3.MPEG1 {
+		parts = append(parts, first.Version.String())
+	}
+	if first.CRC {
+		parts = append(parts, "CRC")
+	}
+	return strings.Join(parts, ", ")
 }

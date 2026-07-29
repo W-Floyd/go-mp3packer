@@ -202,6 +202,13 @@ cannot resolve say so and cite the `ab` that produced them.
   `EncodeGranule` for the three halves, `BenchmarkRecompressWorkers` for the `-j`
   curve, `MP3PACKER_BENCH_FILE=bards-tale.mp3` for long material. `benchstat` is
   at `$(go env GOPATH)/bin/benchstat`.
+- **Generated tables: never hand-edit one.** Every table in README.md and
+  PERFORMANCE.md sits between HTML-comment markers and is written by code —
+  `TestComparison` and `TestSavings` with `-update-readme` for the README's,
+  `benchsteps inject` for PERFORMANCE.md's. All of them render through
+  `olekukonko/tablewriter`, which is why the columns line up. That dependency is
+  test-and-tool only: `go list -deps .` does not reach it, so nothing a consumer
+  of the library builds does either.
 - **`cmd/benchsteps` owns the step tables in PERFORMANCE.md**, and `ab` is how a single
   change is measured — see *How to A/B a change* above. Do not hand-edit the
   tables; add a commit to `bench/steps.json`, `run -sweep`, then `inject`. Runs are cached in
