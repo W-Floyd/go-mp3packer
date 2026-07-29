@@ -1,5 +1,16 @@
+# The built binary, from `go build ./cmd/mp3packer` at the root or from inside the
+# command's own directory. Both are anchored: a bare "mp3packer" also matches the
+# cmd/mp3packer *directory*, and would silently ignore any new source file added
+# there — main.go only survives that by being tracked already.
 /mp3packer
-mp3packer
+/cmd/mp3packer/mp3packer
+
+# Test binaries and profile output.
 *.test
 *.out
+
 /dist/
+
+# Benchmark material kept locally rather than committed, which is what
+# MP3PACKER_BENCH_FILE is for. Anchored, so testdata is unaffected.
+/*.mp3
