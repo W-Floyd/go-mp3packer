@@ -99,11 +99,15 @@ func (s Stats) Saved() int { return s.InputSize - s.OutputSize }
 // bitrate, which indicates a corrupt input rather than a repacking failure.
 var ErrReservoirOverflow = errors.New("mp3packer: frame data does not fit at the maximum bitrate")
 
-// frameWork is the per-frame outcome of the recompression stage.
+// frameWork is the per-frame outcome of the recompression stage. New side info
+// is written back into the frame rather than carried here: it is 536 bytes, and
+// one per frame is three and a half megabytes of the repack's allocation on a
+// long track. A worker owns its frame outright, and the write happens only once
+// the granules are all coded and verified, so a frame that is given up on still
+// has the side info it arrived with.
 type frameWork struct {
-	data      []byte       // the frame's own main data, packed and byte-aligned
-	side      mp3.SideInfo // side info to emit, main_data_begin not yet set
-	rewritten bool         // side info fields changed, so it must be re-serialized
+	data      []byte // the frame's own main data, packed and byte-aligned
+	rewritten bool   // side info fields changed, so it must be re-serialized
 	abandoned bool
 	newBits   int
 }
@@ -289,7 +293,6 @@ func recompressFrame(fr *mp3.Frame, pool []byte, start int, buf []byte, opt Opti
 	verbatim := func(abandoned bool) frameWork {
 		return frameWork{
 			data:      mainData(fr, pool, start, buf),
-			side:      fr.SideInfo,
 			abandoned: abandoned,
 			newBits:   fr.MainDataBits(),
 		}
@@ -373,7 +376,10 @@ func recompressFrame(fr *mp3.Frame, pool []byte, start int, buf []byte, opt Opti
 			bits += side.Gr[gr][ch].Part23Length
 		}
 	}
-	return frameWork{data: newData, side: side, rewritten: true, newBits: bits}
+	// Committed only here, with every granule coded and checked: until this
+	// point each verbatim return above still sees the frame as it arrived.
+	fr.SideInfo = side
+	return frameWork{data: newData, rewritten: true, newBits: bits}
 }
 
 func granuleConfig(g mp3.GranuleInfo) huffman.Config {
@@ -475,7 +481,7 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		h.Padding = chosen[i].Padding
 		header := h.Bytes()
 
-		side := work[i].side
+		side := fr.SideInfo
 		side.MainDataBegin = mdb[i]
 		var sideRaw []byte
 		if work[i].rewritten {

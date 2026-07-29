@@ -345,23 +345,25 @@ wrote zeros nobody looked at.
 
 ### Where the cores go
 
-A worker per core gets 9.7× out of sixteen, and it is worth knowing why it is not
-sixteen, because the answer is not in the search at all. Timing the stages of a
-repack of two and a half minutes of music, one worker against sixteen, each the
-median of fifteen runs:
+A worker per core gets about ten times out of sixteen, and it is worth knowing
+why it is not sixteen, because the answer is not in the search at all. Timing the
+stages of a repack of two and a half minutes of music, one worker against
+sixteen, each the median of fifteen runs:
 
 | | −j 1 | −j 16 |
 | --- | --- | --- |
-| parse and build the reservoir view | 1.54 ms | 1.69 ms |
-| recompress | 184.05 | 15.82 |
-| lay the frames back out | 1.78 | 1.79 |
-| **serial share of the total** | **1.8%** | **18.0%** |
+| parse and build the reservoir view | 1.66 ms | 1.63 ms |
+| recompress | 178.35 | 15.01 |
+| lay the frames back out | 1.45 | 1.30 |
+| **serial share of the total** | **1.7%** | **16.4%** |
 
-The ratio has been falling as the parallel stage gets faster: it was 10.4× when
-the search was slower, and every step that only speeds up recompression pushes it
-down. That is not a regression, it is the serial floor becoming a larger share of
-a smaller total, and it is the argument for spending effort on the two stages
-either side of it rather than on the search.
+"About ten" rather than a figure: the ratio moves by several percent between
+sittings, and quoting it to one decimal invites reading noise as a change. It
+does have a real direction, though — it falls as the parallel stage gets faster
+without the serial one following, so every step that only speeds up the search
+pushes it down. That is not a regression but the serial floor becoming a larger
+share of a smaller total, and it is the argument for spending effort on the two
+stages either side of the search rather than on the search.
 
 Build with `-tags mp3timing` for those three figures: `Stats` carries them and `-v`
 prints them. They are compiled out by default, because reading the clock four times
@@ -369,7 +371,7 @@ costs about a hundred nanoseconds a file — nothing against a repack, but a
 measurable fraction of the layout-only benchmark, which is one of the benchmarks
 used to judge the layout pass.
 
-The recompression itself scales 11.6× across twelve performance cores and four
+The recompression itself scales 11.9× across twelve performance cores and four
 efficiency ones, which is about what four half-speed cores predict. What caps the
 total is the sixth of the wall clock that never shrinks. That is also why a kernel
 win measured on one worker mostly vanishes across all of them — the AVX2 row
@@ -435,6 +437,32 @@ is worth about 0.9%, which does not clear the noise there. It earns no row in th
 step table above, which is one worker on the eight-second file and cannot see a
 serial change at all; where it shows is the stage table under *Where the cores
 go*, as layout falling from 2.48 ms to 1.78.
+
+**Side info written back rather than carried.** The per-frame result of the
+recompression stage held a whole `mp3.SideInfo`, which is 536 bytes, so on a
+6071-frame track that slice alone was three and a half megabytes. It is written
+into the frame instead — a worker owns its frame outright, and the write happens
+only once every granule is coded and verified, so a frame that is given up on
+still has the side info it arrived with, which is exactly what the fallback path
+needs. Serial path 2.95 ms to 2.70, winning all six rotated pairs, and allocation
+19.4 MB to 16.1 per repack. In the stage table above it lands entirely on layout,
+1.76 ms to 1.45 on one worker and 1.53 to 1.30 on sixteen, measured against the
+previous commit in the same sitting.
+
+Like the reservoir change it earns no row in the step table, and for a reason
+worth stating rather than assuming: measured there it reads −0.3% and wins three
+rotated pairs of six, which is nothing. That table is one worker on the
+eight-second file, where there are 309 frames rather than 6071 — the slice this
+removes is 166 kB there against three and a half megabytes on real material. A
+step that scales with the frame count is invisible on the file the step table
+uses, which is worth remembering before concluding that a serial change did not
+work.
+
+That leaves four file-sized buffers, all about the same size: the reservoir view
+of the input, the arena the workers code into, the output, and the frame list
+itself. `madvise` — the kernel taking pages back — is 40% of what is left of the
+serial profile, so allocation is now the whole of the serial cost worth chasing,
+rather than any of the code in it.
 
 Caching `Frame.MainDataBits` was the other half of this item and was dropped.
 Recomputing it — a loop over granules and channels summing `part2_3_length`, from

@@ -81,6 +81,17 @@ func checkRepack(t *testing.T, name string, data, out []byte, stats Stats, opt O
 	inAudio := data[len(in.StartJunk) : len(data)-len(in.EndJunk)]
 	outAudio := out[len(in.StartJunk) : len(out)-len(in.EndJunk)]
 
+	// The input region has to be checked for the same mis-lock as the output
+	// one, and for the same reason. Trimming the trailing junk changes where the
+	// best reading of the remainder starts: one case here parses as a frame at
+	// offset 0 whole, and as a different frame at offset 3 once four trailing
+	// bytes are gone. Comparing that against what Process actually worked from
+	// compares two different files.
+	inFile, err := mp3.Parse(inAudio)
+	if err != nil || len(inFile.StartJunk) != 0 || len(inFile.Frames) != len(in.Frames) {
+		return
+	}
+
 	outFile, err := mp3.Parse(outAudio)
 	if err != nil {
 		t.Fatalf("%s: output frame region does not parse: %v", name, err)
