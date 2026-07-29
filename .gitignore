@@ -18,3 +18,8 @@
 # benchsteps takes a lock while it measures, so that two sweeps cannot interleave
 # their writes or contend for the machine.
 *.lock
+
+# Test binaries benchsteps built from each commit, kept so that a re-run does not
+# rebuild the whole history. Their names carry the harness and toolchain they were
+# built with, so a stale one is never reused.
+/bench/.build/

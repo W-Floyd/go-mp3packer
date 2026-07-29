@@ -46,6 +46,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -264,7 +265,7 @@ func runCmd(args []string) error {
 	force := fs.Bool("force", false, "discard cached runs and measure from scratch")
 	sweep := fs.Bool("sweep", false, "measure every cell in this session, which is what inject requires")
 	adopt := fs.Bool("adopt", false, "accept a cache that carries no fingerprint as this machine's")
-	work := fs.String("work", "", "directory for worktrees (default: a temporary one)")
+	cacheDir := fs.String("build-cache", "bench/.build", "where built test binaries are kept between runs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -381,37 +382,31 @@ func runCmd(args []string) error {
 	}
 	defer unlock()
 
-	dir := *work
-	if dir == "" {
-		d, err := os.MkdirTemp("", "benchsteps")
-		if err != nil {
-			return err
-		}
-		dir = d
-		defer os.RemoveAll(dir)
+	// Test binaries are kept between runs. A commit's code cannot change, so the
+	// only things that make a binary stale are the harness and the toolchain, and
+	// both are in the name — a stale one is never picked up, it is simply never
+	// asked for again. Without this every invocation paid twenty worktrees and
+	// twenty builds, about a minute, before measuring anything.
+	buildKey := digestOf(harness, fp.GoVersion, fp.GOOS, fp.GOARCH)
+	if err := os.MkdirAll(*cacheDir, 0o755); err != nil {
+		return err
 	}
 
 	// Build only the commits with work outstanding.
-	bins, built := map[string]string{}, []string{}
+	bins := map[string]string{}
 	for _, c := range todo {
 		commit := out.Steps[c.step].Commit
 		if _, ok := bins[commit]; ok {
 			continue
 		}
-		bin, err := build(dir, commit)
+		bin, err := build(*cacheDir, commit, buildKey)
 		if err != nil {
 			out.Steps[c.step].Skip = err.Error()
 			fmt.Fprintf(os.Stderr, "%s: %v\n", commit, err)
 			continue
 		}
 		bins[commit] = bin
-		built = append(built, commit)
 	}
-	defer func() {
-		for _, commit := range built {
-			_ = exec.Command("git", "worktree", "remove", "--force", filepath.Join(dir, commit)).Run()
-		}
-	}()
 
 	for pass := 0; ; pass++ {
 		todo = pending()
@@ -448,8 +443,59 @@ func runCmd(args []string) error {
 		if err := writeJSON(*outPath, out); err != nil {
 			return err
 		}
+		progress(os.Stderr, out, cfg, session, *sweep, pass+1, *tol)
 	}
 	return writeJSON(*outPath, out)
+}
+
+// progress prints the medians so far after each pass. A sweep takes long enough
+// that watching the individual runs go by says little — what is worth seeing is
+// the shape of the table forming, and whether a row is settling or wandering.
+// Cells still short of their target are marked, so it is clear which numbers are
+// still moving and which are done.
+func progress(w io.Writer, out results, cfg config, session int, sweep bool, pass int, tol float64) {
+	fmt.Fprintf(w, "\n=== pass %d, session %d: medians so far, ms ===\n", pass, session)
+
+	ids := make([]string, 0, len(cfg.Inputs))
+	for _, in := range cfg.Inputs {
+		ids = append(ids, in.ID)
+	}
+	label := 0
+	for _, s := range out.Steps {
+		label = max(label, len(s.Label))
+	}
+	fmt.Fprintf(w, "%-*s", label, "")
+	for _, id := range ids {
+		fmt.Fprintf(w, "  %14s", id)
+	}
+	fmt.Fprintln(w)
+
+	for _, s := range out.Steps {
+		fmt.Fprintf(w, "%-*s", label, s.Label)
+		for _, id := range ids {
+			runs := s.Cells[id].inSession(0)
+			if sweep {
+				runs = s.Cells[id].inSession(session)
+			}
+			if len(runs) == 0 {
+				fmt.Fprintf(w, "  %14s", "—")
+				continue
+			}
+			// A trailing ? is a cell whose median is still moving; a bare number
+			// is one that has reached its target and will not be measured again.
+			mark := " "
+			var want float64 = tol
+			if i := slices.IndexFunc(cfg.Inputs, func(x input) bool { return x.ID == id }); i >= 0 {
+				want = tolFor(cfg.Inputs[i], tol)
+			}
+			if relSE(runs) > want {
+				mark = "?"
+			}
+			fmt.Fprintf(w, "  %10s%s%-3s", sigFigs(median(runs)/1e6, 4), mark, fmt.Sprintf("%d", len(runs)))
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w)
 }
 
 // loadCache reads previous measurements, keeping only what is still comparable.
@@ -630,17 +676,33 @@ func tableOf(cfg config, inputID string) string {
 	return ""
 }
 
-// build checks a commit out into its own worktree, adds the harness and
-// compiles a test binary from it.
-func build(dir, commit string) (string, error) {
-	wt := filepath.Join(dir, commit)
-	if out, err := exec.Command("git", "worktree", "add", "--detach", "-f", wt, commit).CombinedOutput(); err != nil {
+// build returns a test binary for a commit, compiling it if the cache has none.
+// The worktree exists only for the compile and is removed straight after: what
+// is worth keeping is the binary, not the checkout.
+func build(cacheDir, commit, key string) (string, error) {
+	bin, err := filepath.Abs(filepath.Join(cacheDir, commit+"-"+key+".test"))
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(bin); err == nil {
+		return bin, nil
+	}
+
+	parent, err := os.MkdirTemp("", "benchsteps")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(parent)
+	wt := filepath.Join(parent, commit)
+	if out, err := exec.Command("git", "worktree", "add", "--detach", wt, commit).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("worktree: %v: %s", err, out)
 	}
+	defer exec.Command("git", "worktree", "remove", "--force", wt).Run()
+
 	if err := os.WriteFile(filepath.Join(wt, "zz_benchstep_test.go"), []byte(harness), 0o644); err != nil {
 		return "", err
 	}
-	bin := filepath.Join(dir, commit+".test")
+	fmt.Fprintf(os.Stderr, "building %s\n", commit)
 	cmd := exec.Command("go", "test", "-c", "-o", bin, ".")
 	cmd.Dir = wt
 	if out, err := cmd.CombinedOutput(); err != nil {

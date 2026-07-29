@@ -123,8 +123,8 @@ re-measuring. See *Reading these tables* below before drawing conclusions from a
 small difference.
 
 <!-- benchsteps:provenance -->
-Measured on Apple M4 Max, 16 cpus, 26.5.2, go1.26.5. Each figure is the median of 8 to 156 runs,
-taken until the standard error of the median fell under its target (0.8% for short, 0.8% for long1, 0.8% for longall).
+Measured on Apple M4 Max, 16 cpus, 26.5.2, go1.26.5. Each figure is the median of 5 to 6 runs,
+taken until the standard error of the median fell under its target (1.5% for short, 1.5% for long1, 1.5% for longall).
 <!-- /benchsteps:provenance -->
 
 Repacking an 8-second VBR file, one worker, so the numbers reflect the search
@@ -133,24 +133,26 @@ itself rather than the core count:
 <!-- benchsteps:steps-short -->
 | | ms |
 | --- | --- |
-| first working version | 187 |
-| NEON / SSE2 kernels | 38.9 |
+| first working version | 188 |
+| NEON / SSE2 kernels | 38.8 |
 | tail costs batched, decode by table lookup | 22.9 |
 | region search reduced to arithmetic | 18.2 |
-| count1 quadruples and pair signs branchless | 17.3 |
-| preallocation, encoder invariants hoisted | 16.5 |
-| AVX2 path for the cost kernels | 16.3 |
-| bit window's tail read from a pad | 16.0 |
-| AVX2 tail reduction batched four rows | 16.1 |
+| count1 quadruples and pair signs branchless | 17.4 |
+| preallocation, encoder invariants hoisted | 16.4 |
+| AVX2 path for the cost kernels | 16.6 |
+| bit window's tail read from a pad | 16.3 |
+| AVX2 tail reduction batched four rows | 16.2 |
 | coder's state kept out of memory | 15.2 |
 | memoised region costs not called per candidate | 14.7 |
-| prefix covers batched | 14.1 |
+| prefix covers batched | 14.2 |
 | before the frame CRC was folded | 14.2 |
-| frame CRC folded a byte at a time | 14.1 |
-| window-switched geometry in its own loop | 14.0 |
+| frame CRC folded a byte at a time | 14.2 |
+| window-switched geometry in its own loop | 14.1 |
 | encoder's accumulator held in registers | 13.6 |
 | reservoir described rather than built | 13.7 |
 | side info written into the frame | 13.7 |
+| frame CRC folded four bytes at a time | 13.6 |
+| frame data read from the reservoir in place | 13.7 |
 <!-- /benchsteps:steps-short -->
 
 One row per commit, which is as fine as the history goes. An earlier
@@ -165,48 +167,53 @@ two and a half minutes of real music, 6071 frames:
 <!-- benchsteps:steps-long -->
 | | one worker, ms | all cores, ms |
 | --- | --- | --- |
-| first working version | 2123 | 185 |
-| NEON / SSE2 kernels | 494 | 50.0 |
-| tail costs batched, decode by table lookup | 311 | 35.2 |
-| region search reduced to arithmetic | 264 | 29.3 |
-| count1 quadruples and pair signs branchless | 259 | 28.8 |
-| preallocation, encoder invariants hoisted | 245 | 26.5 |
-| AVX2 path for the cost kernels | 246 | 26.9 |
-| bit window's tail read from a pad | 239 | 25.7 |
-| AVX2 tail reduction batched four rows | 238 | 25.6 |
-| coder's state kept out of memory | 222 | 24.1 |
-| memoised region costs not called per candidate | 217 | 24.1 |
-| prefix covers batched | 210 | 23.3 |
-| before the frame CRC was folded | 211 | 23.3 |
-| frame CRC folded a byte at a time | 206 | 19.3 |
+| first working version | 2126 | 179 |
+| NEON / SSE2 kernels | 492 | 50.4 |
+| tail costs batched, decode by table lookup | 310 | 35.5 |
+| region search reduced to arithmetic | 264 | 29.1 |
+| count1 quadruples and pair signs branchless | 259 | 29.0 |
+| preallocation, encoder invariants hoisted | 246 | 26.7 |
+| AVX2 path for the cost kernels | 246 | 27.1 |
+| bit window's tail read from a pad | 240 | 25.7 |
+| AVX2 tail reduction batched four rows | 239 | 25.6 |
+| coder's state kept out of memory | 220 | 24.3 |
+| memoised region costs not called per candidate | 218 | 24.1 |
+| prefix covers batched | 210 | 23.5 |
+| before the frame CRC was folded | 211 | 23.4 |
+| frame CRC folded a byte at a time | 207 | 19.6 |
 | window-switched geometry in its own loop | 205 | 19.3 |
-| encoder's accumulator held in registers | 196 | 18.3 |
-| reservoir described rather than built | 198 | 18.4 |
-| side info written into the frame | 196 | 18.1 |
+| encoder's accumulator held in registers | 196 | 18.5 |
+| reservoir described rather than built | 198 | 18.3 |
+| side info written into the frame | 197 | 18.5 |
+| frame CRC folded four bytes at a time | 196 | 17.8 |
+| frame data read from the reservoir in place | 197 | 17.9 |
 <!-- /benchsteps:steps-long -->
 
-End to end that is 2123 ms down to 196 on one worker, and 185 to 18.1 across
-sixteen — 10.8× and 10.2×, by quite different routes.
+End to end that is 2126 ms down to 197 on one worker, and 179 to 17.9 across
+sixteen — 10.8× and 10.0×, by quite different routes.
 
 Read the two columns against each other rather than down. The frame CRC fold is
-worth 2.1% on one worker and 17.2% across sixteen, because it comes entirely out
+worth 1.9% on one worker and 16.2% across sixteen, because it comes entirely out
 of the part no number of workers can share. The encoder accumulator is the
-ordinary shape, 4.1% and 5.0%, being work that parallelises. That divergence is
+ordinary shape, 4.4% and 4.1%, being work that parallelises. That divergence is
 the single most useful thing these tables say, and it is why every claim in the
 rest of this section carries a worker count.
 
-The last two rows earn their place by being flat: both only move allocation, and
-neither of these end-to-end measurements can see it. What resolves them is the
-serial-path benchmark, and the figures are given with that stated where they are
-claimed further down. A table that showed every commit as an improvement would be
-a table that had stopped measuring.
+Those two are also, at the tolerance these were taken at, about the only rows
+whose individual steps these tables resolve at all — see below. The last few rows
+in particular are flat here and are not claimed on this evidence: folding the CRC
+four bytes at a time is three times faster on the routine and 12% off the serial
+path, and reading frame data in place removes an allocation from the layout-only
+path, which is a path neither of these columns exercises, both running with the
+search on. A table showing every commit as an improvement would be a table that
+had stopped measuring.
 
 The all-cores column is much the noisier of the two, and both are held to the
-same half-percent target, so it simply takes far more runs to get there: sixteen
-workers contending, with the collector running against them, does not repeat as
-closely as one worker does. Some all-cores cells need an order of magnitude more
-runs than their single-worker neighbours for the same confidence, which is worth
-knowing before setting a tighter target — the cost goes as the square of it.
+same target, so it takes more runs to get there: sixteen workers contending, with
+the collector running against them, does not repeat as closely as one worker
+does. At a tight target some all-cores cells need an order of magnitude more runs
+than their single-worker neighbours, which is worth knowing before setting one —
+the cost goes as the inverse square.
 
 This table needs `bards-tale.mp3`, which is not in the repository. Set
 `MP3PACKER_BENCH_FILE` to any few minutes of real encoded music to reproduce its
@@ -214,13 +221,22 @@ shape, though not its numbers.
 
 ### Reading these tables
 
-Every figure is a median taken until its own standard error fell under half a
-percent of it, interleaved in a rotating order, with each individual run recorded
-in `bench/results.json`. Two medians that good still differ by chance, so **a
-difference under about 1.5% is not a result** — several adjacent rows here are
-within noise of each other, and a couple read as very slightly slower than the
-row above. That is what an honest table of a long history looks like; a monotone
-one would mean the numbers had been chosen rather than measured.
+Every figure is a median taken until its own standard error fell under a target,
+interleaved in a rotating order, with each individual run recorded in
+`bench/results.json`. The provenance line above gives the target actually used.
+
+Work out what that target buys before reading anything into a small step. Two
+medians each good to *t* differ by chance with a standard error of about *t*√2, so
+a difference needs roughly 3*t* before it means anything. At the 1.5% these were
+taken at, **a difference under about 4% is not a result** — which is most of the
+recent history. Tightening to 0.5% would bring that down to about 1.5%, at four
+times the runs and something over half an hour; the numbers above were not worth
+that to me, and a row that matters can always be settled by a direct A/B of two
+commits, which is what the claims elsewhere in this section rest on.
+
+Several adjacent rows here are within noise of each other and a couple read as
+very slightly slower than the row above. That is what an honest table of a long
+history looks like.
 
 Rotating the order matters and is not a detail. A fixed A, B, C order gives
 whichever binary always goes last a systematic penalty on a machine that is
@@ -234,13 +250,18 @@ go run ./cmd/benchsteps run     # top up bench/results.json
 go run ./cmd/benchsteps inject  # rewrite the tables above from it
 ```
 
-A full sweep of the history over both files is many minutes, nearly all of it
-re-deriving numbers that settled long ago, so runs accumulate rather than being
-replaced: each pass measures only the cells whose median is still moving, and
-stops once the standard error of that median is under half a percent of it,
-giving up on a cell after 250 runs. Adding one commit to `bench/steps.json`
-costs about one commit's worth of measurement, not eighteen, and re-running with
-nothing changed costs nothing at all.
+`run` alone tops up only the cells whose medians are still moving, which is cheap
+and right while iterating on a change. `run -sweep` measures every cell in one
+session, which is what `inject` requires: runs carry the session they were taken
+in, and a table assembled from several is not internally comparable — this
+machine drifts about 7% between sittings, more than most of the steps in the
+tables, and a cross-session median once invented a 3.1% win that a same-sitting
+A/B put at 0.2%. `inject` refuses rather than warns.
+
+Test binaries are kept in `bench/.build` between runs. A commit's code cannot
+change, so only the harness and the toolchain can stale one, and both are in the
+filename; a stale binary is never reused, just never asked for again. Without it
+every invocation rebuilt twenty worktrees before measuring anything.
 
 What makes a stored run reusable is a fingerprint: the machine, its CPU and OS
 version, the Go toolchain, the benchmark harness, and each input's contents
