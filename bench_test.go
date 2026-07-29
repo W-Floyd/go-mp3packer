@@ -175,23 +175,16 @@ func firstFrameSize(t *testing.T, data []byte) int {
 	return f.Frames[0].Size()
 }
 
-// BenchmarkProcessFile repacks through the file entry point, so the read, the
-// write and the rename are all in the figure. Process alone leaves them out, and
-// on the eight-second file they are a third of the work.
-func BenchmarkProcessFile(b *testing.B) {
-	dir := b.TempDir()
-	for _, path := range testFiles(b) {
-		data := read(b, path)
-		out := filepath.Join(dir, filepath.Base(path))
-		b.Run(filepath.Base(path), func(b *testing.B) {
-			b.SetBytes(int64(len(data)))
-			for b.Loop() {
-				if _, err := ProcessFile(path, out, Options{Recompress: true}); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
+// benchFiles is the corpus plus whatever MP3PACKER_BENCH_FILE points at, so that
+// the file benchmarks can be run over real-length material as well. Eight seconds
+// is short enough that fixed costs dominate, which is the opposite of how anyone
+// uses this.
+func benchFiles(tb testing.TB) []string {
+	files := testFiles(tb)
+	if path := os.Getenv("MP3PACKER_BENCH_FILE"); path != "" {
+		files = append(files, path)
 	}
+	return files
 }
 
 // mp3packerBinary builds the command, so that it can be timed the way a user
@@ -205,17 +198,16 @@ func mp3packerBinary(tb testing.TB) string {
 	return bin
 }
 
-// BenchmarkCLI runs the built command as a subprocess.
-//
-// This is the only like-for-like comparison with BenchmarkReference, and the
-// reason it exists: that one execs another implementation, so it pays for a
-// process start and for reading and writing a file, and neither Process nor
-// ProcessFile pays for a process start. Comparing either against it flatters us
-// by the whole cost of exec, which on a file this small is not a rounding error.
+// BenchmarkCLI runs the built command as a subprocess, which is how anyone
+// actually repacks a file and the only like-for-like comparison with
+// BenchmarkReference — that one execs another implementation, so it pays for a
+// process start and for touching the disk, and Process pays for neither.
+// Comparing Process against it flatters us by the whole cost of exec, which on a
+// short file is larger than the repack.
 func BenchmarkCLI(b *testing.B) {
 	bin := mp3packerBinary(b)
 	dir := b.TempDir()
-	for _, path := range testFiles(b) {
+	for _, path := range benchFiles(b) {
 		data := read(b, path)
 		out := filepath.Join(dir, filepath.Base(path))
 		b.Run(filepath.Base(path), func(b *testing.B) {
@@ -252,7 +244,7 @@ func referenceBinary(tb testing.TB) string {
 func BenchmarkReference(b *testing.B) {
 	bin := referenceBinary(b)
 	dir := b.TempDir()
-	for _, path := range testFiles(b) {
+	for _, path := range benchFiles(b) {
 		data := read(b, path)
 		out := filepath.Join(dir, filepath.Base(path))
 		b.Run(filepath.Base(path), func(b *testing.B) {

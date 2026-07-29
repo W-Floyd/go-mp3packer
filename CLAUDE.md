@@ -174,11 +174,12 @@ cannot resolve say so and cite the `ab` that produced them.
   the properties the benchmark depends on.
 
 - **Any speed claim against another implementation must be CLI against CLI.**
-  `BenchmarkReference` execs a subprocess that reads and writes files;
-  `Process` does neither. On the 8-second file the three differ by more than the
-  repack itself — 1.36 ms in memory, 1.57 through `ProcessFile`, 4.76 as a
-  command, of which 2.88 is starting the process. Pairing `Process` against
-  `BenchmarkReference` overstated the lead by about 3×. Use `BenchmarkCLI`.
+  `BenchmarkReference` execs a subprocess that reads and writes files; `Process`
+  does neither, and on the 8-second file the difference is larger than the repack
+  — 1.36 ms against 4.76, of which 2.88 is starting the process. Pairing `Process`
+  against `BenchmarkReference` overstated the lead by about 3×. Use
+  `BenchmarkCLI`, and prefer `MP3PACKER_BENCH_FILE` over the 8-second file, where
+  fixed costs dominate.
 
 ## Tooling
 

@@ -101,38 +101,25 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are ahead. Repacking the 8-second VBR file on an Apple M4 Max, both
-multi-threaded:
+On speed we are ahead. Both invoked as commands, on an Apple M4 Max:
 
-| | ms |
-| --- | --- |
-| `Process`, bytes already in memory | 1.36 |
-| `ProcessFile`, and the read, write and rename | 1.57 |
-| the command, as a user runs it | 4.76 |
-| of which: starting the process | 2.88 |
+| | `go-mp3packer` | `mp3packercpp` |
+| --- | --- | --- |
+| 8-second VBR, 180 kB | 4.8 ms | 22.4 ms |
+| 2m38s, 192 kbps CBR, 3.8 MB | 24.4 ms | — |
 
-The figure to compare is the third. `BenchmarkReference` execs another
-implementation, so it pays for a process start and for touching the disk, and
-`BenchmarkCLI` is the only one of ours that pays the same. Against the 22.4 ms
-recorded for the C++ port, that is about 4.7×. Comparing `Process` with it instead
-flatters us by an exec and two file operations.
-
-Note what the decomposition says: on a file this small our own startup is 2.88 ms,
-more than the repack it exists to perform. Go's runtime is a poor fit for a tool
-invoked once per file, and anyone repacking a library one call at a time is paying
-that per file. It does not show on the two-and-a-half-minute track, where it is a
-percent and a half.
-
-The 22.4 ms has not been re-measured here — the reference binary is not on this
-machine — so treat the ratio as provisional and take both sides together:
+`BenchmarkCLI` and `BenchmarkReference` are the pair, both timing a subprocess
+over a file, so the exec and the disk are in each. To reproduce, and to fill in
+the figure this machine has no binary for:
 
 ```sh
+export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3
 MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run TestReference -v .
 MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run XXX -bench 'CLI|Reference' .
 ```
 
-`BenchmarkCLI` and `BenchmarkReference` are the pair that compare; `Recompress`
-and `ProcessFile` measure us against ourselves.
+For measuring changes to the code rather than comparing implementations, see
+[PERFORMANCE.md](PERFORMANCE.md).
 
 ## Performance
 
