@@ -14,3 +14,7 @@
 # Benchmark material kept locally rather than committed, which is what
 # MP3PACKER_BENCH_FILE is for. Anchored, so testdata is unaffected.
 /*.mp3
+
+# benchsteps takes a lock while it measures, so that two sweeps cannot interleave
+# their writes or contend for the machine.
+*.lock

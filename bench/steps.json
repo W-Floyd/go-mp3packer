@@ -1,0 +1,194 @@
+{
+  "inputs": [
+    {
+      "id": "short",
+      "path": "testdata/bench-vbr.mp3",
+      "workers": 1,
+      "benchtime": "40x"
+    },
+    {
+      "id": "long1",
+      "path": "$MP3PACKER_BENCH_FILE",
+      "workers": 1,
+      "benchtime": "2x"
+    },
+    {
+      "id": "longall",
+      "path": "$MP3PACKER_BENCH_FILE",
+      "workers": 0,
+      "benchtime": "15x"
+    }
+  ],
+  "tables": [
+    {
+      "id": "steps-short",
+      "columns": [
+        {
+          "input": "short",
+          "header": "ms"
+        }
+      ],
+      "sigFigs": 3
+    },
+    {
+      "id": "steps-long",
+      "columns": [
+        {
+          "input": "long1",
+          "header": "one worker, ms"
+        },
+        {
+          "input": "longall",
+          "header": "all cores, ms"
+        }
+      ],
+      "sigFigs": 3
+    }
+  ],
+  "steps": [
+    {
+      "commit": "dccd9a1",
+      "label": "first working version",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "6a819dd",
+      "label": "NEON / SSE2 kernels",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "72f5d80",
+      "label": "tail costs batched, decode by table lookup",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "e0b4a62",
+      "label": "region search reduced to arithmetic",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "77769a9",
+      "label": "count1 quadruples and pair signs branchless",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "6e01f96",
+      "label": "preallocation, encoder invariants hoisted",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "30781f4",
+      "label": "AVX2 path for the cost kernels",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "990c36a",
+      "label": "bit window's tail read from a pad",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "49485f4",
+      "label": "AVX2 tail reduction batched four rows",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "d42371d",
+      "label": "coder's state kept out of memory",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "b723919",
+      "label": "memoised region costs not called per candidate",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "cc1dd58",
+      "label": "prefix covers batched",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "5f8421c",
+      "label": "before the frame CRC was folded",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "f987874",
+      "label": "frame CRC folded a byte at a time",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "30323e5",
+      "label": "window-switched geometry in its own loop",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "3ecdf7d",
+      "label": "encoder's accumulator held in registers",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "3be0ea7",
+      "label": "reservoir described rather than built",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    },
+    {
+      "commit": "b15d4c7",
+      "label": "side info written into the frame",
+      "tables": [
+        "steps-short",
+        "steps-long"
+      ]
+    }
+  ]
+}
