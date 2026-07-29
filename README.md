@@ -417,9 +417,18 @@ back with `Resume`. Nothing about the bits changes; all 24 corpus outputs are
 byte-identical. `BenchmarkEncodeGranule` goes from 827 ns to 618 ns, a quarter
 off, and `Write64` at 51% of `Encode` becomes `Store` at 12%. End to end on the
 two-and-a-half-minute track that is 197 ms to 187 ms on one worker, 4.8%, which
-is what `Encode` being 18.8% of a worker predicts; across sixteen it is 1.9%,
-since this is work that does parallelise. The Xeon agrees: 5135 ns to 4079 on the
-granule, 723 ms to 685 on the track.
+is what `Encode` being 18.8% of a worker predicts. The Xeon agrees: 5135 ns to
+4079 on the granule, 723 ms to 685 on the track.
+
+This is work that parallelises, so unlike the frame CRC it is worth *less* across
+all cores rather than more, and by different amounts on the two machines: 20.1 ms
+to 19.6 on sixteen, 2.7%, against 51.1 ms to 48.7 on forty, 4.7%. The serial floor
+explains the gap. It is a fifth of the arm64 all-core run and much less of the
+Xeon's, so the same saving in the parallel part is diluted more on the machine
+that has less parallel part left. Both were measured as eight interleaved pairs of
+twenty runs, which is the least that separates them: at three pairs the arm64
+figure read 1.9% one way and 3.5% the other depending on whether the runs were
+summarised by median or by mean.
 
 Two things were tried and dropped. A lower bound on each big_values, to skip
 candidates that cannot win, prunes almost nothing — moving a coefficient pair
