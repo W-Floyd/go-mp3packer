@@ -143,12 +143,20 @@ itself rather than the core count (Apple M4 Max, best of six runs):
 | memoised region costs no longer called once per candidate | 13.6 |
 | prefix covers batched, losing candidates rejected before the call | 13.5 |
 | window-switched geometry searched in its own loop | 13.0 |
+| encoder's accumulator held in registers | 12.6 |
 
 Each row from `boundary tests` downwards was measured against the row above it in
 the same sitting. Between sittings the same code moves by a few percent — the
 `prefix rows stored pre-scaled` row measured 21.7 rather than 20.5 when it was
 re-run, and `memoised region costs` measured 13.9 — so read these as steps
-relative to their neighbours rather than as one continuous scale.
+relative to their neighbours rather than as one continuous scale. The last row is
+an example: its sitting read 13.81 for the row above it and 13.38 for itself, and
+it is the ratio between those two that is carried onto the 13.0 anchor.
+
+Interleave in a rotating order, not a fixed one. Running A, B, C and then A, B, C
+again gives whichever binary always goes last a systematic penalty on a machine
+that is warming up — the encoder row first read as a 1.3% *regression* measured
+that way, and came out level once the order rotated.
 
 The table is arm64. Every step since the kernels became architecture-specific has
 been re-measured on a Xeon E5-2698 v4, on two and a half minutes of music as well
