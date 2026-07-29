@@ -175,6 +175,60 @@ func firstFrameSize(t *testing.T, data []byte) int {
 	return f.Frames[0].Size()
 }
 
+// BenchmarkProcessFile repacks through the file entry point, so the read, the
+// write and the rename are all in the figure. Process alone leaves them out, and
+// on the eight-second file they are a third of the work.
+func BenchmarkProcessFile(b *testing.B) {
+	dir := b.TempDir()
+	for _, path := range testFiles(b) {
+		data := read(b, path)
+		out := filepath.Join(dir, filepath.Base(path))
+		b.Run(filepath.Base(path), func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				if _, err := ProcessFile(path, out, Options{Recompress: true}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// mp3packerBinary builds the command, so that it can be timed the way a user
+// actually invokes it.
+func mp3packerBinary(tb testing.TB) string {
+	tb.Helper()
+	bin := filepath.Join(tb.TempDir(), "mp3packer")
+	if out, err := exec.Command("go", "build", "-o", bin, "./cmd/mp3packer").CombinedOutput(); err != nil {
+		tb.Fatalf("building the command: %v: %s", err, out)
+	}
+	return bin
+}
+
+// BenchmarkCLI runs the built command as a subprocess.
+//
+// This is the only like-for-like comparison with BenchmarkReference, and the
+// reason it exists: that one execs another implementation, so it pays for a
+// process start and for reading and writing a file, and neither Process nor
+// ProcessFile pays for a process start. Comparing either against it flatters us
+// by the whole cost of exec, which on a file this small is not a rounding error.
+func BenchmarkCLI(b *testing.B) {
+	bin := mp3packerBinary(b)
+	dir := b.TempDir()
+	for _, path := range testFiles(b) {
+		data := read(b, path)
+		out := filepath.Join(dir, filepath.Base(path))
+		b.Run(filepath.Base(path), func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				if err := exec.Command(bin, "-q", "-f", path, out).Run(); err != nil {
+					b.Fatalf("%s: %v", bin, err)
+				}
+			}
+		})
+	}
+}
+
 // referenceBinary returns the path to another mp3packer implementation to compare
 // against, taken from $MP3PACKER_REFERENCE. It is expected to accept
 // "-z <in> <out>", which both the original OCaml mp3packer and the C++ port do.

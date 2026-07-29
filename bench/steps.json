@@ -17,6 +17,13 @@
       "path": "$MP3PACKER_BENCH_FILE",
       "workers": 0,
       "benchtime": "15x"
+    },
+    {
+      "id": "serial",
+      "path": "$MP3PACKER_BENCH_FILE",
+      "workers": 1,
+      "benchmark": "BenchmarkBenchStepSerial",
+      "benchtime": "30x"
     }
   ],
   "tables": [
@@ -46,6 +53,17 @@
         }
       ],
       "sigFigs": 3
+    },
+    {
+      "id": "steps-serial",
+      "sigFigs": 3,
+      "columns": [
+        {
+          "input": "serial",
+          "header": "serial path, ms",
+          "delta": true
+        }
+      ]
     }
   ],
   "steps": [
@@ -54,7 +72,8 @@
       "label": "first working version",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -62,7 +81,8 @@
       "label": "NEON / SSE2 kernels",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -70,7 +90,8 @@
       "label": "tail costs batched, decode by table lookup",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -78,7 +99,8 @@
       "label": "region search reduced to arithmetic",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -86,7 +108,8 @@
       "label": "count1 quadruples and pair signs branchless",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -94,7 +117,8 @@
       "label": "preallocation, encoder invariants hoisted",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -102,7 +126,8 @@
       "label": "AVX2 path for the cost kernels",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -110,7 +135,8 @@
       "label": "bit window's tail read from a pad",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -118,7 +144,8 @@
       "label": "AVX2 tail reduction batched four rows",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -126,7 +153,8 @@
       "label": "coder's state kept out of memory",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -134,7 +162,8 @@
       "label": "memoised region costs not called per candidate",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -142,7 +171,8 @@
       "label": "prefix covers batched",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -150,7 +180,8 @@
       "label": "before the frame CRC was folded",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -158,7 +189,8 @@
       "label": "frame CRC folded a byte at a time",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -166,7 +198,8 @@
       "label": "window-switched geometry in its own loop",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -174,7 +207,8 @@
       "label": "encoder's accumulator held in registers",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -182,7 +216,8 @@
       "label": "reservoir described rather than built",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -190,7 +225,8 @@
       "label": "side info written into the frame",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -198,7 +234,8 @@
       "label": "frame CRC folded four bytes at a time",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     },
     {
@@ -206,7 +243,8 @@
       "label": "frame data read from the reservoir in place",
       "tables": [
         "steps-short",
-        "steps-long"
+        "steps-long",
+        "steps-serial"
       ]
     }
   ]

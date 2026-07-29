@@ -1,0 +1,224 @@
+# go-mp3packer — working notes
+
+Hard-won context for anyone (human or agent) changing this code. Remaining work
+lives in [TODO.md](TODO.md); the README's Performance section carries the
+measured history, the cross-arch table, the scaling decomposition, and a
+tried-and-dropped list.
+
+## Verification protocol — please pass this on
+
+Every commit in this series holds to it, and two changes would have shipped
+wrong without it:
+
+- Byte-identical output against the previous commit: 24 outputs (8 files ×
+  `""`/`-n`/`-no-crc`, counting the long track `bards-tale.mp3`), on both arches
+  and across them. This is the backstop that matters.
+- The remote box has no Go toolchain or package sources, so two suites need care
+  there: `mp3`'s tests want `../testdata`, so run that binary from a `mp3/`
+  subdirectory, and `TestHotPathsStillInline` shells out to `go build`, so it
+  cannot run cross-compiled at all. Both look like failures if you just run the
+  binaries in one directory.
+- For anything touching `Optimize`: compare the chosen `Config`, not just the bit
+  count. `TestOptimizeMatchesExhaustiveSearch` compares costs only, so a tie
+  broken differently passes it and silently changes output bytes. The scaffold
+  used dumps `fmt.Fprintf(out, "%d %d %v %d", n, rate, cfg, bits)` over 400
+  spectra × 6 sample rates × 6 geometries (long, short, short+mixed, start, stop,
+  short with count1 table 33) = 14,400 searches, run in both trees and diffed.
+- `benchCorpus` searches every granule with `WindowSwitching: false`.
+  `BenchmarkOptimizeGranule` cannot see any change to the switched path — that's
+  why `BenchmarkOptimizeGranuleSwitched` exists. Check which path a change
+  touches before trusting a flat result.
+- New amd64 asm must not fall through between dispatch paths. An early AVX2 draft
+  let the SSE2 store block run into the AVX2 block with the counter at zero —
+  `DECQ` wrapped to 2⁶⁴−1 and walked off the heap. Assembles clean, passes vet,
+  impossible on arm64. `TestKernelsDispatchPaths` is what catches it.
+
+### Fuzzing
+
+`FuzzProcess` covers the three option combinations, seeded from `testdata/`.
+Crashers are committed under `testdata/fuzz/` and run in the ordinary suite.
+
+Three of the target's original assertions were wrong rather than the code, and
+telling those apart from real faults was most of the work — read the README's
+Correctness section before adding assertions. In particular: **never assert that
+a re-parse of the output agrees with the parse of the input.** Parsing is a
+search, junk and payload can both hold plausible headers, and the repack changes
+which reading wins. Assert against the *bytes*.
+
+## How to A/B a change
+
+Use the tool. Every hand-rolled harness in this project's history got something
+wrong — a fixed run order, two halves built from the same tree, three pairs
+mistaken for a sample — and each mistake produced a plausible number rather than
+an error.
+
+**Before committing**, which is when the answer decides something:
+
+```sh
+export MP3PACKER_BENCH_FILE=$PWD/bards-tale.mp3
+go run ./cmd/benchsteps ab -input serial HEAD WORK
+```
+
+`WORK` is the working tree as it stands — modifications, new files and deletions
+alike, everything git would not ignore. It is recorded as a dangling commit
+through a temporary index, so your tree and your index are left exactly as they
+were: no branch, no commit, nothing to undo, and nothing lost if the run is
+interrupted, which these runs are. The build comes from a clean checkout of that
+commit, which is also what keeps the generated harness files out of your tree.
+
+Pick the input that can see the change — `serial` for anything in parsing or
+layout, `short` for the search, `long1`/`longall` for a whole repack — and leave
+`-input` off to get all four.
+
+`WORK` runs are not stored: the code they measured stops existing the moment you
+edit again, and the commit holding it is dangling and will be collected, so
+pooling it later would be meaningless. The committed side's runs are kept.
+
+**After committing**, name both:
+
+```sh
+go run ./cmd/benchsteps ab b15d4c7 212628e
+```
+
+It builds both, alternates which runs first, measures until each median's
+standard error is under 0.5%, and prints the step with its error bar:
+
+```
+serial         2.799 ->     2.501 ms  -10.66% ±0.73  −10.7%
+```
+
+`≈` in the last column means the measurement cannot support a direction — see
+*Reading these tables* in the README for what the thresholds are and why an
+increase needs twice the evidence of a decrease. These runs are stored and are
+pooled into the README's step tables, so a pair measured here is a pair `inject`
+can draw on.
+
+**Then put it in the history.** Add the commit to `bench/steps.json`, then
+`run -sweep` and `inject`. Do not hand-edit the tables.
+
+**Run nothing else while a sweep is going.** Not `go test`, not `go vet`, not
+`gofmt`, not a build in another checkout. The lock in `results.json.lock` stops a
+second `benchsteps` and can do nothing about ordinary development, which competes
+for the same cores just as hard. A full sweep is ten to thirty minutes of the
+machine being unavailable; that is the cost of the tables, and working through it
+poisons them. It has happened: seventeen passes were thrown away because a
+`go vet` and a `go test` were run between them.
+
+Every run records its pass as well as its session, which is what makes that
+detectable afterwards. A sweep measures every cell once per pass, so dividing each
+timing by its own cell's median leaves the machine's conditions with the code
+divided out — a pass 15% slow across all twenty commits at once was a busy
+machine, not twenty simultaneous regressions. `run` warns when it sees one, and
+the remedy keeps the rest of the session:
+
+```sh
+go run ./cmd/benchsteps prune -contaminated 1.05 -dry-run   # what would go
+go run ./cmd/benchsteps prune -contaminated 1.05            # drop those passes
+go run ./cmd/benchsteps prune -session 3                    # or the whole sitting
+```
+
+**What the tables are not.** They are the shape of twenty steps at once. A step
+of a few per cent is buried in a twenty-row sweep and wants `ab`, which settles
+the same question in a couple of minutes. Claims in the README that the tables
+cannot resolve say so and cite the `ab` that produced them.
+
+## Traps that cost time — worth knowing up front
+
+- **`bench-vbr.mp3` overstates search work ~2×.** Dense 8-second VBR.
+  `bestTails` is 19% of profile there, 10% on real music. Always confirm via
+  `MP3PACKER_BENCH_FILE`.
+- **Only 2 of 8 test files carry CRCs** (`cbr-crc.mp3` and `bards-tale.mp3`).
+  Layout work is invisible without one. `BenchmarkLayoutOnly` builds its own
+  input from the first of them for exactly this reason; any *new* layout
+  benchmark has the same problem.
+- **Interleave A/B runs in a rotating order, not a fixed one.** A fixed A, B, C
+  penalises whichever binary always goes last on a warming machine. The encoder
+  step first read as a 1.3% regression that way and came out level once rotated.
+  `benchsteps` rotates; a loop you write by hand will not unless you make it.
+- **1-worker and all-core diverge sharply.** Serial is 2% of one worker, 20% of
+  sixteen. AVX2 batching: 4.6% / 0%. CRC table: 1% / 17%. Always say which.
+- **Don't trust profile deltas between runs.** `Writer.put` read 4.6% and 8.9% on
+  identical code. Use interleaved A/B wall-clock; profiles for *where*, not *how
+  much*. Noise: `BenchmarkOptimizeGranule*` ±1–3%, `BenchmarkLayoutOnly` ±2%
+  since `9754913`, end-to-end ±1–5%. Use `-count 10` and `benchstat` with
+  p-values; `~` is a real answer.
+- **Three interleaved pairs is not enough for an all-core number.** The encoder
+  change read 1.9% by median and 3.5% by mean off the same three pairs; eight
+  pairs of `-benchtime 20x` put it at 2.7% and won every pair. Sample until the
+  sign is unanimous, not until the means differ.
+- **Verify which tree each half of an A/B came from** — or better, let
+  `benchsteps ab` do it, which is why it exists. Running both sides from the same
+  clone once produced a fabricated -2.9%.
+- **`BenchmarkLayoutOnly` times the whole serial path** and layout is only ~a
+  quarter of it (parsing is the rest). Build with `-tags mp3timing` for the two
+  stages separately — and read those for attribution only, since the per-call
+  stage clocks swing ±20% where the total swings 2%. `TestLayoutBenchInput` pins
+  the properties the benchmark depends on.
+
+- **Any speed claim against another implementation must be CLI against CLI.**
+  `BenchmarkReference` execs a subprocess that reads and writes files;
+  `Process` does neither. On the 8-second file the three differ by more than the
+  repack itself — 1.36 ms in memory, 1.57 through `ProcessFile`, 4.76 as a
+  command, of which 2.88 is starting the process. Pairing `Process` against
+  `BenchmarkReference` overstated the lead by about 3×. Use `BenchmarkCLI`.
+
+## Tooling
+
+- **x86 box:** `192.168.1.2`, Xeon E5-2698 v4, 2.2 GHz locked (no turbo — don't
+  assume 3.6), 40 threads, Go 1.26.5. Cross-compile and `scp` test binaries;
+  don't sync source. Locally, Rosetta runs amd64 test binaries for correctness
+  only.
+- **`-tags mp3timing`** for `Stats.Prepare`/`Recompress`/`Layout` + `Serial()`,
+  printed by `-v`. Compiled out by default (verified zero-cost).
+- **Attribution:** `BenchmarkOptimizeGranule` / `DecodeGranule` /
+  `EncodeGranule` for the three halves, `BenchmarkRecompressWorkers` for the `-j`
+  curve, `MP3PACKER_BENCH_FILE=bards-tale.mp3` for long material. `benchstat` is
+  at `$(go env GOPATH)/bin/benchstat`.
+- **`cmd/benchsteps` owns the README's step tables**, and `ab` is how a single
+  change is measured — see *How to A/B a change* above. Do not hand-edit the
+  tables; add a commit to `bench/steps.json`, `run -sweep`, then `inject`. Runs are cached in
+  `bench/results.json` and only unsettled cells are re-measured, so adding one
+  step costs one step, and re-running unchanged costs nothing. The cache is keyed
+  on machine, CPU, OS version, Go toolchain, harness digest and per-input digest
+  — and on a hand-bumped `measurementVersion` const, which **must** be
+  incremented if you change how a run is produced, since nothing else will
+  notice. Presentation (labels, order, headers, table membership) comes from
+  `steps.json` at inject time, so changing it needs no re-measurement.
+- **Killing a `run` mid-sweep is safe and normal.** Results are written after
+  every pass, and the lock is taken over automatically once its owning pid is
+  gone. Tightening the tolerance costs runs as its inverse square: all-core cells
+  went 8 to 156 runs between 1.5% and 0.75%, and the all-core column needs an
+  order of magnitude more runs than single-worker for the same confidence.
+- **This machine drifts ~7% between sittings**, which is larger than most steps
+  in the tables. That is why runs carry a session and `inject` will only publish
+  from one: plain `run` is for iterating, `run -sweep` is what makes a table.
+  Chasing a tight tolerance across sittings buys nothing — prefer 1.5% in one
+  session over 0.75% spread over five. A cross-sitting median invented a 3.1%
+  one-worker win for the CRC fold that a same-sitting A/B put at 0.2%. Steps are
+  pooled across sessions by *ratio*, which is drift-free, so old sessions keep
+  earning their keep even though old absolutes cannot be compared.
+- **Sanity-check a step against arithmetic before believing it.** The CRC fold
+  saves 23 ns on each of 6071 frames; that is 0.14 ms, and on a 183 ms one-worker
+  run it cannot be 3%. Any end-to-end figure much larger than the routine's own
+  saving is measurement error, not a discovery.
+- **`bards-tale.mp3`** is gitignored, real 6071-frame material (2m38s, 192 kbps
+  CBR), and the only input with meaningful CRC and switched-granule coverage — a
+  new session won't have it unless you say so.
+
+## Settled — don't re-attempt without new evidence
+
+- **Caching `Frame.MainDataBits` per frame.** The 30 ms of 440 ms was real when
+  first written; on current code it is 1.4% of the serial-path profile and does
+  not appear in the one-worker profile at all — about 0.3% of an all-cores
+  repack, for a cache threaded through four callers. Everything around it got
+  faster and it stopped being worth it.
+- **Both forms of the `pairDecode` treatment** measured flat or worse (README's
+  tried-and-dropped list). Note the diagnosis that motivated them was wrong:
+  `abs` is 0.9% of `Encode`, not 3.5% — the 3.5% in the whole-program profile is
+  `pairCost` in the search, not the encoder. What paid instead was the bit
+  writer: `put` will not inline, so every pair went through memory;
+  `Pending`/`Store`/`Resume` let `Encode` hold the accumulator in two locals for
+  the whole granule (−25% on the granule, −4.8% / −5.3% on one worker,
+  −2.7% / −4.7% all cores, arm64 / x86-64).
+- Also dropped, per the README: `big_values` pruning, int32 `Spectrum`,
+  bit-reader rewrite.
