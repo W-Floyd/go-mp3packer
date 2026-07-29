@@ -23,8 +23,11 @@ func BenchmarkRecompress(b *testing.B) {
 	}
 }
 
+// BenchmarkRecompressSingleWorker measures the recompression kernels themselves:
+// with one worker the numbers are far less noisy than the parallel run, and they
+// scale directly with any change to the search.
 func BenchmarkRecompressSingleWorker(b *testing.B) {
-	data := read(b, "testdata/vbr-joint.mp3")
+	data := read(b, "testdata/bench-vbr.mp3")
 	b.SetBytes(int64(len(data)))
 	for b.Loop() {
 		if _, _, err := Process(data, Options{Recompress: true, Workers: 1}); err != nil {

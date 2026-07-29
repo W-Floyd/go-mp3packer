@@ -249,8 +249,13 @@ func recompressFrame(fr mp3.Frame, pool []byte, start int, opt Options) frameWor
 
 	r := bitio.NewReader(pool)
 	r.Seek(from * 8)
-	w := bitio.NewWriter()
+	// The result is only kept if it is smaller than the input, so the frame's
+	// current size is a hard upper bound on what the writer will need.
+	w := bitio.NewWriterSize(fr.MainDataBytes())
 	side := fr.SideInfo
+	// One spectrum for decoding and one for the verification pass, reused across
+	// the frame's granules: they are 4.6kB each, too big to keep copying.
+	var spectrum, roundTrip huffman.Spectrum
 
 	for gr := 0; gr < h.Granules(); gr++ {
 		for ch := 0; ch < h.Channels(); ch++ {
@@ -267,8 +272,7 @@ func recompressFrame(fr mp3.Frame, pool []byte, start int, opt Options) frameWor
 			w.Copy(r, sfBits)
 
 			cfg := granuleConfig(*g)
-			spectrum, ok := huffman.Decode(cfg, r, h.SampleRate, origBits-sfBits)
-			if !ok {
+			if !huffman.Decode(&spectrum, cfg, r, h.SampleRate, origBits-sfBits) {
 				return verbatim(true)
 			}
 			best, bits := huffman.Optimize(&spectrum, cfg, h.SampleRate)
@@ -283,8 +287,7 @@ func recompressFrame(fr mp3.Frame, pool []byte, start int, opt Options) frameWor
 			// reproduce the spectrum exactly before accepting it.
 			check := bitio.NewReader(w.Bytes())
 			check.Seek(huffStart)
-			roundTrip, ok := huffman.Decode(best, check, h.SampleRate, w.Tell()-huffStart)
-			if !ok || roundTrip != spectrum {
+			if !huffman.Decode(&roundTrip, best, check, h.SampleRate, w.Tell()-huffStart) || roundTrip != spectrum {
 				return verbatim(true)
 			}
 

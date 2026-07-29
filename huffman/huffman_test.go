@@ -113,8 +113,8 @@ func TestOptimizeRoundTrip(t *testing.T) {
 					t.Fatalf("%dHz peak %d: Optimize predicted %d bits, Encode wrote %d",
 						rate, peak, bits, w.Tell())
 				}
-				got, ok := Decode(best, bitio.NewReader(w.Bytes()), rate, bits)
-				if !ok {
+				var got Spectrum
+				if !Decode(&got, best, bitio.NewReader(w.Bytes()), rate, bits) {
 					t.Fatalf("%dHz peak %d: re-decode failed", rate, peak)
 				}
 				if got != s {
@@ -164,7 +164,8 @@ func TestDecodeRejectsTruncatedData(t *testing.T) {
 
 	// Claiming fewer bits than the spectrum needs must be reported, not guessed
 	// at: this is how a frame with a bad reservoir pointer gets caught.
-	if _, ok := Decode(cfg, bitio.NewReader(w.Bytes()), 44100, bits/2); ok {
+	var out Spectrum
+	if Decode(&out, cfg, bitio.NewReader(w.Bytes()), 44100, bits/2) {
 		t.Error("truncated granule decoded as if valid")
 	}
 }

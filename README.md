@@ -101,8 +101,8 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-Speed is comparable — a little ahead on the files above (19 ms versus 24 ms for an
-8-second VBR file on an M-series laptop, both multi-threaded).
+On speed we are now well ahead: 4.3 ms versus 22.6 ms to repack an 8-second VBR
+file (Apple M4 Max, both multi-threaded; see below).
 
 To reproduce, point the benchmarks at any other implementation that accepts
 `-z in out`:
@@ -111,6 +111,67 @@ To reproduce, point the benchmarks at any other implementation that accepts
 MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run TestReference -v .
 MP3PACKER_REFERENCE=/path/to/mp3packercpp go test -run XXX -bench 'Recompress$|Reference$' .
 ```
+
+## Performance
+
+Repacking an 8-second VBR file, one worker, so that the numbers reflect the
+search itself rather than the core count (Apple M4 Max):
+
+| | ms |
+| --- | --- |
+| first working version | 190 |
+| cost tables laid out pair-major | 132 |
+| memo packed, winner tracked as scalars | 121 |
+| NEON / SSE2 kernels | 101 |
+| region search factored by shape | 45.6 |
+| decode from a 64-bit window, no 4.6 kB spectrum copies | 38.4 |
+| batched encoder writes | 36.2 |
+
+With all cores it is 4.3 ms for the same file. Every step was verified by
+comparing output byte for byte against the previous one, so none of this changed
+a single bit of any result.
+
+Two of those steps carried the work; the rest were ordinary tuning:
+
+**Layout.** The search costs a region by subtracting two per-table prefix sums.
+Keeping those sums table-major meant every query strided across 32 separate rows;
+pair-major makes it two cache lines. Only 24 prefixes are ever needed — the
+scalefactor band boundaries plus wherever big_values currently sits — so the
+accumulator walks the pairs once and snapshots as it goes, instead of
+materialising a row per pair.
+
+**Factoring.** The obvious search enumerates every (region0_count, region1_count)
+pair for every big_values: measured at 11,000 inner iterations and 24,000 region
+lookups per granule, against only 2,400 that actually reached the vector kernel.
+But regions 0 and 1 do not move as big_values does. Their best combination is a
+property of the boundary they end at, so it is computed once per boundary and
+reused, leaving only the tail to recompute. Same answers, a third of the work.
+
+A lower bound on each big_values, to skip candidates that cannot win, was tried
+and removed: it prunes almost nothing, because moving a coefficient pair between
+the big-values and count1 regions barely changes the total.
+
+### Assembly
+
+Two kernels have hand-written arm64 (NEON) and amd64 (SSE2) implementations, with
+portable Go equivalents for everything else:
+
+| | asm | Go | |
+| --- | --- | --- | --- |
+| `accumulate` — add 288 pairs' costs across all 32 tables | 262 ns | 3323 ns | 12.7× |
+| `bestTable` — cheapest of 32 tables for one region | 3.0 ns | 10.9 ns | 3.7× |
+
+Both are 32 lanes wide with no gathers, which is the whole reason they vectorise:
+a pair's cost for every table is one row of a precomputed table, indexed by the
+pair's clamped magnitudes, and the escape penalty is a second row indexed by how
+many linbits it needs. `bestTable` packs each cost above the table index so that
+one unsigned minimum yields both the cost and the winning table, ties included.
+`TestKernelsMatchPortable` compares the assembly against the Go implementations
+on randomised input, so the fallbacks stay honest.
+
+The SSE2 path sticks to the amd64 baseline: `PMINSD` would shorten `bestTable`,
+but not enough to justify a runtime feature check. It is tested on x86-64 in CI;
+the figures above are arm64.
 
 ## Correctness
 

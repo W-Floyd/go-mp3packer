@@ -46,6 +46,7 @@ func spectra(t *testing.T, data []byte) []huffman.Spectrum {
 		pool = append(pool, fr.MainData...)
 	}
 	var out []huffman.Spectrum
+	var s huffman.Spectrum
 	for i, fr := range f.Frames {
 		h := fr.Header
 		from := starts[i] - fr.SideInfo.MainDataBegin
@@ -61,8 +62,7 @@ func spectra(t *testing.T, data []byte) []huffman.Spectrum {
 				sf := mp3.ScalefactorBits(h, fr.SideInfo, gr, ch)
 				r.Skip(sf)
 				cfg := granuleConfig(g)
-				s, ok := huffman.Decode(cfg, r, h.SampleRate, g.Part23Length-sf)
-				if !ok {
+				if !huffman.Decode(&s, cfg, r, h.SampleRate, g.Part23Length-sf) {
 					t.Fatalf("frame %d granule %d/%d did not decode", i, gr, ch)
 				}
 				out = append(out, s)

@@ -52,78 +52,85 @@ func (c Config) regionPairs(sampleRate int) (r0, r1, r2 int) {
 	return r0, r1, bv - r0 - r1
 }
 
-// Decode reads a granule's spectrum. r must be positioned at the first Huffman
-// bit (that is, past the scalefactors) and maxBits is the number of Huffman bits
-// the granule declares.
+// Decode reads a granule's spectrum into dst. r must be positioned at the first
+// Huffman bit (that is, past the scalefactors) and maxBits is the number of
+// Huffman bits the granule declares.
 //
-// The returned bool reports whether the granule decoded cleanly: the big-values
+// The result reports whether the granule decoded cleanly: the big-values
 // region has to fit within maxBits, and every symbol has to be a defined code.
 // A false result means the granule cannot be safely recompressed — most often
 // because the frame references reservoir data that the file does not contain.
-func Decode(cfg Config, r *bitio.Reader, sampleRate, maxBits int) (Spectrum, bool) {
-	var s Spectrum
+func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int) bool {
+	*dst = Spectrum{}
 	limit := r.Tell() + maxBits
 	pos := 0
-	ok := true
-
-	decodeSymbol := func(idx int) (int, bool) {
-		tree := tables[idx].tree
-		if len(tree) == 0 {
-			return 0, false
-		}
-		p := 0
-		for {
-			v := tree[p]
-			if v >= 0 {
-				return int(v), true
-			}
-			p++
-			if r.Read(1) != 0 {
-				p -= int(v)
-			}
-			if p >= len(tree) {
-				return 0, false
-			}
-		}
-	}
 
 	// The bit limit is checked once per pair, never mid-symbol: a codeword that
 	// starts inside the granule is read whole, matching how decoders behave.
+	// A whole pair — code, escape magnitudes and signs — is at most 47 bits, so it
+	// is decoded out of a single peeked word rather than bit by bit.
 	region := func(pairs, idx int) bool {
+		tree := tables[idx].tree
+		linbits := uint(tables[idx].linbits)
 		end := pos + 2*pairs
 		for pos < end && pos < NumCoefficients-1 {
 			if idx != 0 && r.Tell() >= limit {
 				return false
 			}
-			sym, good := decodeSymbol(idx)
-			if !good {
+			if len(tree) == 0 {
 				return false
 			}
-			linbits := tables[idx].linbits
-			x, y := (sym>>4)&0xF, sym&0xF
-			if x > 0 {
-				if x == 15 && linbits > 0 {
-					x += int(r.Read(linbits))
+			w := r.Peek64()
+			used := 0
+			node := 0
+			for {
+				v := tree[node]
+				if v >= 0 {
+					x, y := int(v>>4)&0xF, int(v)&0xF
+					if x > 0 {
+						if x == 15 && linbits > 0 {
+							x += int(w >> (64 - linbits))
+							w <<= linbits
+							used += int(linbits)
+						}
+						if w>>63 != 0 {
+							x = -x
+						}
+						w <<= 1
+						used++
+					}
+					if y > 0 {
+						if y == 15 && linbits > 0 {
+							y += int(w >> (64 - linbits))
+							w <<= linbits
+							used += int(linbits)
+						}
+						if w>>63 != 0 {
+							y = -y
+						}
+						used++
+					}
+					dst[pos], dst[pos+1] = x, y
+					pos += 2
+					r.Skip(used)
+					break
 				}
-				if r.Read(1) != 0 {
-					x = -x
+				node++
+				if w>>63 != 0 {
+					node -= int(v)
+				}
+				w <<= 1
+				used++
+				if node >= len(tree) {
+					r.Skip(used)
+					return false
 				}
 			}
-			if y > 0 {
-				if y == 15 && linbits > 0 {
-					y += int(r.Read(linbits))
-				}
-				if r.Read(1) != 0 {
-					y = -y
-				}
-			}
-			s[pos] = x
-			s[pos+1] = y
-			pos += 2
 		}
 		return true
 	}
 
+	ok := true
 	r0, r1, r2 := cfg.regionPairs(sampleRate)
 	for _, reg := range [][2]int{{r0, cfg.TableSelect[0]}, {r1, cfg.TableSelect[1]}, {r2, cfg.TableSelect[2]}} {
 		if !region(reg[0], reg[1]) {
@@ -135,35 +142,58 @@ func Decode(cfg Config, r *bitio.Reader, sampleRate, maxBits int) (Spectrum, boo
 	// Everything past the big values is coded as quadruples of -1, 0 or 1 until
 	// the granule's bits run out.
 	if ok {
+		tree := tables[cfg.Count1Table].tree
 		for pos <= NumCoefficients-4 && r.Tell() < limit {
-			sym, good := decodeSymbol(cfg.Count1Table)
-			if !good {
-				ok = false
-				break
-			}
-			for bit := 3; bit >= 0; bit-- {
-				v := 0
-				if sym&(1<<uint(bit)) != 0 {
-					v = 1
-					if r.Read(1) != 0 {
-						v = -1
+			w := r.Peek64()
+			used, node := 0, 0
+			for {
+				v := tree[node]
+				if v >= 0 {
+					for bit := 3; bit >= 0; bit-- {
+						val := 0
+						if int(v)&(1<<uint(bit)) != 0 {
+							val = 1
+							if w>>63 != 0 {
+								val = -1
+							}
+							w <<= 1
+							used++
+						}
+						dst[pos] = val
+						pos++
 					}
+					r.Skip(used)
+					break
 				}
-				s[pos] = v
-				pos++
+				node++
+				if w>>63 != 0 {
+					node -= int(v)
+				}
+				w <<= 1
+				used++
+				if node >= len(tree) {
+					r.Skip(used)
+					ok = false
+					break
+				}
+			}
+			if !ok {
+				break
 			}
 		}
 	}
 	if r.Tell() > r.Len() {
 		ok = false // ran off the end of the available reservoir data
 	}
-	return s, ok
+	return ok
 }
 
 // Encode writes a spectrum using cfg. cfg must be able to represent every
 // coefficient, which is guaranteed for the Config returned by Optimize.
 func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 	pos := 0
+	// A pair's code, escape magnitudes and signs come to at most 47 bits, so they
+	// are assembled in a register and handed over in one call.
 	writePair := func(x, y, idx int) {
 		if idx == 0 {
 			return
@@ -172,19 +202,24 @@ func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 		ax, ay := abs(x), abs(y)
 		sx, sy := min(ax, 15), min(ay, 15)
 		c := encodeTables[idx][sx<<4|sy]
-		w.Write(c.bits, c.length)
+		word, n := uint64(c.bits), c.length
 		if sx == 15 && linbits > 0 {
-			w.Write(uint32(ax-15), linbits)
+			word = word<<uint(linbits) | uint64(ax-15)
+			n += linbits
 		}
 		if ax != 0 {
-			w.Write(signBit(x), 1)
+			word = word<<1 | uint64(signBit(x))
+			n++
 		}
 		if sy == 15 && linbits > 0 {
-			w.Write(uint32(ay-15), linbits)
+			word = word<<uint(linbits) | uint64(ay-15)
+			n += linbits
 		}
 		if ay != 0 {
-			w.Write(signBit(y), 1)
+			word = word<<1 | uint64(signBit(y))
+			n++
 		}
+		w.Write64(word, n)
 	}
 
 	r0, r1, r2 := cfg.regionPairs(sampleRate)
@@ -204,12 +239,14 @@ func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 			}
 		}
 		c := encodeTables[cfg.Count1Table][sym]
-		w.Write(c.bits, c.length)
+		word, n := uint64(c.bits), c.length
 		for i := 0; i < 4; i++ {
 			if v := s[pos+i]; v != 0 {
-				w.Write(signBit(v), 1)
+				word = word<<1 | uint64(signBit(v))
+				n++
 			}
 		}
+		w.Write64(word, n)
 		pos += 4
 	}
 }
