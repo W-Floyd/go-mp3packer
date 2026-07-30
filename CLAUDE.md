@@ -255,5 +255,16 @@ cannot resolve say so and cite the `ab` that produced them.
   `Pending`/`Store`/`Resume` let `Encode` hold the accumulator in two locals for
   the whole granule (−25% on the granule, −4.8% / −5.3% on one worker,
   −2.7% / −4.7% all cores, arm64 / x86-64).
+- **PGO.** Measured `~` on one worker, all cores and all four granule
+  benchmarks; the command itself came out 1–2% slower on one profile and level on
+  another, so the sign is build luck. It does apply — forty-five extra inline
+  decisions, all in the hot path — but the inlining that matters here is already
+  forced by hand and pinned by `TestHotPathsStillInline`, the rest is assembly,
+  and there is no interface call in `huffman` or `bitio` to devirtualise. Note
+  where a profile is looked for before re-testing: only
+  `cmd/mp3packer/default.pgo` is auto-applied, `go test` discovers nothing, and
+  `benchsteps` builds with a plain `go test -c` — so the step tables cannot see
+  PGO without a harness change and a `measurementVersion` bump. PERFORMANCE.md
+  has the numbers.
 - Also dropped, per the README: `big_values` pruning, int32 `Spectrum`,
   bit-reader rewrite.

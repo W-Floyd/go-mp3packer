@@ -426,6 +426,32 @@ Narrowing `Spectrum` from `int` to `int32` was tried and reverted. It halves the
 worth having on a 32 kB L1; measured on both an M4 Max and a Xeon E5-2698 v4 it
 was worth nothing at all, and it changes an exported type, so it went back.
 
+Profile-guided optimisation was tried and is not worth its plumbing. It does
+reach the right code: a profile of `BenchmarkRecompressFile` on the
+two-and-a-half-minute track, diffed through `-gcflags=all=-m`, adds forty-five
+inline decisions and they are all in the hot path — `decodeRegion` and
+`decodeCount1` into `Decode`, `Encode` with `bitio.Store` and `grow` behind it,
+`fillPrefixes`, `buildCount1Costs`, `snapshot` and the `Optimize` closure. None
+of it is worth anything. Eight interleaved pairs put the track at 183.9 ms to
+183.5 on one worker and 17.92 ms to 17.81 across sixteen, both `~`; the four
+granule benchmarks are `~` as well. The command itself measured 1.3% and 2.2%
+*slower* over forty and twelve pairs, and that reversed to level when the profile
+was taken from `bench-vbr.mp3` instead, so it is build luck either way. All 24
+outputs stay byte-identical, which PGO being semantics-preserving guarantees, and
+a build costs the same. The reason is that PGO has nothing left to do here: the
+inlining the hot path depends on is already forced by hand and pinned by
+`TestHotPathsStillInline`, the rest of it is assembly, and there is no interface
+call anywhere in `huffman` or `bitio` to devirtualise — the two closures in
+`Optimize` are direct calls it merely inlines.
+
+Anyone re-opening it should know where a profile is looked for.
+`cmd/mp3packer/default.pgo` is applied to the command by `-pgo=auto`, and nothing
+else is: a `default.pgo` beside the library is ignored by both `go build
+./cmd/mp3packer` and `go test -c .`. `go test` honours an explicit `-pgo=file`
+but does not discover one, and `cmd/benchsteps` builds with a plain `go test -c`,
+so adopting PGO would ship a command that none of the tables above can measure
+until that harness passes the flag — and that is a `measurementVersion` bump.
+
 ### Assembly
 
 Three kernels have hand-written arm64 (NEON) and amd64 (SSE2/SSE4.1/AVX2)
