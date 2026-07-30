@@ -273,6 +273,15 @@
         "steps-long",
         "steps-serial"
       ]
+    },
+    {
+      "commit": "c56ce1b",
+      "label": "constant-bitrate floor, unused by default",
+      "tables": [
+        "steps-short",
+        "steps-long",
+        "steps-serial"
+      ]
     }
   ]
 }
