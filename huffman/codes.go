@@ -161,7 +161,7 @@ func init() {
 // only the two tables the standard leaves undefined can do, and which the walk has
 // to reach for itself to report the failure.
 func buildPairTable(idx int, out *[pairSize]pairEntry) {
-	tree := tables[idx].tree
+	tree := trees[idx]
 	if len(tree) == 0 {
 		for i := range out {
 			out[i] = pairSlow
@@ -200,7 +200,7 @@ func buildPairTable(idx int, out *[pairSize]pairEntry) {
 // walking every root-to-leaf path.
 func buildEncodeTable(idx int) encodeTable {
 	var out encodeTable
-	tree := tables[idx].tree
+	tree := trees[idx]
 	if len(tree) == 0 || tree[0] == 0 {
 		// The empty tables (0, 4, 14) code nothing but the all-zero pair, for
 		// which they emit no bits at all.
@@ -233,7 +233,7 @@ func buildEncodeTable(idx int) encodeTable {
 // buildDecodeTable walks each possible eight-bit prefix through the decode tree,
 // recording the symbol if the walk finishes and the tree position if it does not.
 func buildDecodeTable(idx int, out *[256]decodeEntry) {
-	tree := tables[idx].tree
+	tree := trees[idx]
 	if len(tree) == 0 {
 		return
 	}

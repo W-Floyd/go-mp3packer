@@ -205,7 +205,10 @@ cannot resolve say so and cite the `ab` that produced them.
 - **Generated tables: never hand-edit one.** Every table in README.md and
   PERFORMANCE.md sits between HTML-comment markers and is written by code —
   `TestComparison` and `TestSavings` with `-update-readme` for the README's,
-  `benchsteps inject` for PERFORMANCE.md's. All of them render through
+  `benchsteps inject` for PERFORMANCE.md's. `huffman/trees_gen.go` is generated
+  too — `go test ./huffman -run TestTreesGenerated -update-trees` derives it from
+  the code grids in `tables.go`, and the same test fails if the committed file has
+  drifted from them. All of them render through
   `olekukonko/tablewriter`, which is why the columns line up. That dependency is
   test-and-tool only: `go list -deps .` does not reach it, so nothing a consumer
   of the library builds does either.

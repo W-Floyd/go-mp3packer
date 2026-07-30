@@ -113,7 +113,7 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 // of one peeked word rather than bit by bit, and the first pairBits of it almost
 // always resolve the codeword and both its magnitudes in a single lookup.
 func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int) (int, int, bool) {
-	tree := tables[idx].tree
+	tree := trees[idx]
 	// A pair needs two coefficients, so the spectrum's own end bounds the region
 	// as much as the declared pair count does. Folding them together leaves one
 	// comparison per pair instead of two.

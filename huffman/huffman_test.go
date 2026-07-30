@@ -25,7 +25,7 @@ func TestTablesAreConsistent(t *testing.T) {
 			}
 			leaves++
 			r := bitio.NewReader(bitsToBytes(c.bits, c.length))
-			tree := tables[idx].tree
+			tree := trees[idx]
 			p := 0
 			for tree[p] < 0 {
 				v := int(tree[p])
@@ -92,7 +92,7 @@ func randomSpectrum(rng *rand.Rand, peak int) Spectrum {
 // the root, with no reference to how the table is packed.
 func TestPairTablesMatchTheTree(t *testing.T) {
 	for idx := range pairTables {
-		tree := tables[idx].tree
+		tree := trees[idx]
 		for prefix := 0; prefix < pairSize; prefix++ {
 			e := pairTables[idx][prefix]
 
