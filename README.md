@@ -107,9 +107,11 @@ disagree about what to keep:
   the C++ port copies those frames through untouched.
 
 On speed, every test file, all three invoked as commands with every core
-available, on an Apple M4 Max. `reference` is `mp3packercpp` as released; `fork`
-is a branch of it carrying optimisation work that upstream does not have, which is
-the more demanding comparison of the two:
+available, on an Apple M4 Max. `reference` is
+[mp3packercpp](https://github.com/Snesnopic/mp3packercpp) as released; `fork` is
+[a branch of it](https://github.com/W-Floyd/mp3packercpp/tree/perf/huffman-region-search)
+carrying optimisation work that upstream does not have, which is the more
+demanding comparison of the two:
 
 <!-- comparison:comparison-files -->
 | file              |    size |    ours |    fork | reference | vs fork | vs ref |
