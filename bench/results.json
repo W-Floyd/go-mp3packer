@@ -16,7 +16,7 @@
   },
   "tolerance": 0.005,
   "minRounds": 5,
-  "session": 17,
+  "session": 21,
   "inputs": [
     {
       "id": "short",
@@ -12711,6 +12711,386 @@
               "ns": 13229208,
               "session": 17,
               "pass": 14
+            }
+          ]
+        }
+      }
+    },
+    {
+      "commit": "acb37e3",
+      "label": "perf: resolve a big-value pair in one lookup, from a ten-bit probe",
+      "tables": null,
+      "cells": {
+        "long1": {
+          "runs": [
+            {
+              "ns": 176136146,
+              "session": 18,
+              "pass": 1
+            },
+            {
+              "ns": 178720542,
+              "session": 18,
+              "pass": 2
+            },
+            {
+              "ns": 176239646,
+              "session": 18,
+              "pass": 3
+            },
+            {
+              "ns": 174072938,
+              "session": 18,
+              "pass": 4
+            },
+            {
+              "ns": 173871000,
+              "session": 18,
+              "pass": 5
+            },
+            {
+              "ns": 174176208,
+              "session": 18,
+              "pass": 6
+            },
+            {
+              "ns": 166421125,
+              "session": 20,
+              "pass": 1
+            },
+            {
+              "ns": 164786083,
+              "session": 20,
+              "pass": 2
+            },
+            {
+              "ns": 164177938,
+              "session": 20,
+              "pass": 3
+            },
+            {
+              "ns": 163500333,
+              "session": 20,
+              "pass": 4
+            },
+            {
+              "ns": 166377771,
+              "session": 20,
+              "pass": 5
+            },
+            {
+              "ns": 164675396,
+              "session": 20,
+              "pass": 6
+            },
+            {
+              "ns": 167160188,
+              "session": 21,
+              "pass": 1
+            },
+            {
+              "ns": 161514292,
+              "session": 21,
+              "pass": 2
+            },
+            {
+              "ns": 158927625,
+              "session": 21,
+              "pass": 3
+            },
+            {
+              "ns": 165616854,
+              "session": 21,
+              "pass": 4
+            },
+            {
+              "ns": 163828250,
+              "session": 21,
+              "pass": 5
+            },
+            {
+              "ns": 160227979,
+              "session": 21,
+              "pass": 6
+            },
+            {
+              "ns": 161425979,
+              "session": 21,
+              "pass": 7
+            },
+            {
+              "ns": 159629979,
+              "session": 21,
+              "pass": 8
+            },
+            {
+              "ns": 159206708,
+              "session": 21,
+              "pass": 9
+            },
+            {
+              "ns": 162433646,
+              "session": 21,
+              "pass": 10
+            },
+            {
+              "ns": 166587250,
+              "session": 21,
+              "pass": 11
+            },
+            {
+              "ns": 161612438,
+              "session": 21,
+              "pass": 12
+            },
+            {
+              "ns": 162667500,
+              "session": 21,
+              "pass": 13
+            },
+            {
+              "ns": 159842896,
+              "session": 21,
+              "pass": 14
+            },
+            {
+              "ns": 162653333,
+              "session": 21,
+              "pass": 15
+            },
+            {
+              "ns": 165955021,
+              "session": 21,
+              "pass": 16
+            },
+            {
+              "ns": 163126771,
+              "session": 21,
+              "pass": 17
+            },
+            {
+              "ns": 165745625,
+              "session": 21,
+              "pass": 18
+            },
+            {
+              "ns": 166577417,
+              "session": 21,
+              "pass": 19
+            },
+            {
+              "ns": 161311646,
+              "session": 21,
+              "pass": 20
+            },
+            {
+              "ns": 166812125,
+              "session": 21,
+              "pass": 21
+            },
+            {
+              "ns": 164759104,
+              "session": 21,
+              "pass": 22
+            },
+            {
+              "ns": 162412000,
+              "session": 21,
+              "pass": 23
+            },
+            {
+              "ns": 168952333,
+              "session": 21,
+              "pass": 24
+            },
+            {
+              "ns": 164183584,
+              "session": 21,
+              "pass": 25
+            },
+            {
+              "ns": 165416980,
+              "session": 21,
+              "pass": 26
+            },
+            {
+              "ns": 167004479,
+              "session": 21,
+              "pass": 27
+            },
+            {
+              "ns": 165027000,
+              "session": 21,
+              "pass": 28
+            }
+          ]
+        },
+        "longall": {
+          "runs": [
+            {
+              "ns": 17540517,
+              "session": 19,
+              "pass": 1
+            },
+            {
+              "ns": 16643928,
+              "session": 19,
+              "pass": 2
+            },
+            {
+              "ns": 17862283,
+              "session": 19,
+              "pass": 3
+            },
+            {
+              "ns": 16694858,
+              "session": 19,
+              "pass": 4
+            },
+            {
+              "ns": 16476897,
+              "session": 19,
+              "pass": 5
+            },
+            {
+              "ns": 16503136,
+              "session": 19,
+              "pass": 6
+            },
+            {
+              "ns": 16642522,
+              "session": 19,
+              "pass": 7
+            },
+            {
+              "ns": 16495100,
+              "session": 19,
+              "pass": 8
+            },
+            {
+              "ns": 16560622,
+              "session": 19,
+              "pass": 9
+            },
+            {
+              "ns": 16508253,
+              "session": 19,
+              "pass": 10
+            },
+            {
+              "ns": 16686989,
+              "session": 19,
+              "pass": 11
+            },
+            {
+              "ns": 16728383,
+              "session": 19,
+              "pass": 12
+            },
+            {
+              "ns": 16473267,
+              "session": 19,
+              "pass": 13
+            },
+            {
+              "ns": 16530742,
+              "session": 19,
+              "pass": 14
+            },
+            {
+              "ns": 16356981,
+              "session": 19,
+              "pass": 15
+            },
+            {
+              "ns": 17264889,
+              "session": 19,
+              "pass": 16
+            },
+            {
+              "ns": 16415364,
+              "session": 19,
+              "pass": 17
+            },
+            {
+              "ns": 16647325,
+              "session": 19,
+              "pass": 18
+            },
+            {
+              "ns": 16555206,
+              "session": 19,
+              "pass": 19
+            },
+            {
+              "ns": 16511564,
+              "session": 19,
+              "pass": 20
+            },
+            {
+              "ns": 16508242,
+              "session": 19,
+              "pass": 21
+            },
+            {
+              "ns": 16506000,
+              "session": 19,
+              "pass": 22
+            },
+            {
+              "ns": 16425342,
+              "session": 19,
+              "pass": 23
+            },
+            {
+              "ns": 16417114,
+              "session": 19,
+              "pass": 24
+            },
+            {
+              "ns": 16452831,
+              "session": 19,
+              "pass": 25
+            },
+            {
+              "ns": 16594006,
+              "session": 19,
+              "pass": 26
+            },
+            {
+              "ns": 16600964,
+              "session": 19,
+              "pass": 27
+            },
+            {
+              "ns": 17259767,
+              "session": 19,
+              "pass": 28
+            },
+            {
+              "ns": 16362389,
+              "session": 19,
+              "pass": 29
+            },
+            {
+              "ns": 16496994,
+              "session": 19,
+              "pass": 30
+            },
+            {
+              "ns": 16545239,
+              "session": 19,
+              "pass": 31
+            },
+            {
+              "ns": 16566983,
+              "session": 19,
+              "pass": 32
+            },
+            {
+              "ns": 16581664,
+              "session": 19,
+              "pass": 33
             }
           ]
         }

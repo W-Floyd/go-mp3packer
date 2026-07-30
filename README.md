@@ -237,8 +237,5 @@ copied through as they are rather than silenced.
 MIT. See [LICENSE](LICENSE).
 
 The code here is original, but the work it reimplements is not: mp3packer is
-copyright © 2006-2012 Reed Wilson and is GPL-2.0-or-later, as is the C++ port.
-The Huffman code tables and scalefactor band tables are the constants defined by
-ISO/IEC 11172-3 and 13818-3 and appear identically in every layer III
-implementation.
+copyright © 2006-2012 Reed Wilson and is GPL-2.0-or-later.
 
