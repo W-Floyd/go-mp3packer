@@ -364,9 +364,10 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	CMPB ·hasAVX2(SB), $0
 	JNE  tailsavx2
 
-	// acc and the lane labels stay in registers for the whole run: X0-X7 hold
-	// acc<<5 with the lane already folded in, so each row costs one subtract per
-	// group and the table index falls out of the minimum.
+	// acc and the lane labels stay in registers for the whole run: X0-X7 hold acc
+	// with the lane already folded in, so each row costs one subtract per group and
+	// the table index falls out of the minimum. Every cost arrives scaled, so there
+	// is nothing to shift here.
 	MOVOU 0(AX), X0
 	MOVOU 16(AX), X1
 	MOVOU 32(AX), X2
@@ -375,14 +376,6 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	MOVOU 80(AX), X5
 	MOVOU 96(AX), X6
 	MOVOU 112(AX), X7
-	PSLLL $5, X0
-	PSLLL $5, X1
-	PSLLL $5, X2
-	PSLLL $5, X3
-	PSLLL $5, X4
-	PSLLL $5, X5
-	PSLLL $5, X6
-	PSLLL $5, X7
 	MOVOU 0(BX), X8
 	POR   X8, X0
 	MOVOU 16(BX), X8
@@ -404,8 +397,8 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	JNE  tailsloop41
 
 tailsloop:
-	// The rows are already scaled: (acc<<5 | lane) - (row<<5) is (acc-row)<<5 |
-	// lane, because the shift leaves the low five bits clear.
+	// Every cost is scaled: (acc | lane) - row is (acc-row) | lane, because the
+	// scaling leaves the low five bits clear.
 	MOVOU 0(SI), X9
 	MOVOU X0, X8
 	PSUBL X9, X8
@@ -457,7 +450,7 @@ tailsdone:
 	VPMINUD Y10, Y8, dst   \
 	ADDQ $128, SI
 
-// Y0-Y3 keep the scaled and labelled accumulator for the whole run. A row is
+// Y0-Y3 keep the labelled accumulator for the whole run. A row is
 // then four subtracts straight from memory and three minimums, with no loads and
 // no register copies of its own.
 tailsavx2:
@@ -465,10 +458,6 @@ tailsavx2:
 	VMOVDQU 32(AX), Y1
 	VMOVDQU 64(AX), Y2
 	VMOVDQU 96(AX), Y3
-	VPSLLD $5, Y0, Y0
-	VPSLLD $5, Y1, Y1
-	VPSLLD $5, Y2, Y2
-	VPSLLD $5, Y3, Y3
 	VPOR 0(BX), Y0, Y0
 	VPOR 32(BX), Y1, Y1
 	VPOR 64(BX), Y2, Y2

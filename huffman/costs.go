@@ -14,13 +14,26 @@ const numTables = 32
 // which is what lets the search work in prefix sums.
 const penalty = 1 << 15
 
+// costShift is how far the cost tables, and therefore every prefix sum built
+// from them, sit above the bottom of an int32. The kernels find the cheapest
+// table by taking a plain minimum over cost<<costShift|table, so the low five
+// bits have to be free for the lane label; scaling the tables once at startup is
+// what keeps that shift out of the search entirely — a prefix sum of scaled
+// costs is already the scaled prefix sum. Everything that reads a cost back as
+// bits goes through unpackBest.
+//
+// Nothing overflows: the worst accumulator is 288 pairs of two penalties, 18.9M,
+// and 604M once scaled. TestCostSumsCannotReachPenalty pins both ends.
+const costShift = 5
+
 // maxPairBits is the most bits a single pair can legitimately cost.
 const maxPairBits = 19 + 2*13 + 2
 
 var (
 	// pairCostTable[symbol][table] is the complete cost of coding a pair whose
 	// magnitudes clamp to symbol: code length, escape length and sign bits
-	// together, since all three follow from the symbol alone.
+	// together, since all three follow from the symbol alone. Both cost tables
+	// hold their values pre-scaled by costShift.
 	pairCostTable [256][numTables]int32
 
 	// escapeCostTable[n][table] penalises tables whose linbits cannot express a
@@ -41,7 +54,7 @@ func init() {
 	for sym := range pairCostTable {
 		sx, sy := sym>>4, sym&15
 		for tab := 0; tab < numTables; tab++ {
-			pairCostTable[sym][tab] = int32(penalty)
+			pairCostTable[sym][tab] = int32(penalty) << costShift
 			if maxQuant[tab] < 0 {
 				continue // undefined table: never selectable
 			}
@@ -62,7 +75,7 @@ func init() {
 			if sy != 0 {
 				cost++
 			}
-			pairCostTable[sym][tab] = int32(cost)
+			pairCostTable[sym][tab] = int32(cost) << costShift
 		}
 	}
 	for sym := range count1Delta {
@@ -77,7 +90,7 @@ func init() {
 			if maxQuant[tab] >= 0 && tables[tab].linbits >= need {
 				escapeCostTable[need][tab] = 0
 			} else if need > 0 {
-				escapeCostTable[need][tab] = int32(penalty)
+				escapeCostTable[need][tab] = int32(penalty) << costShift
 			}
 		}
 	}
@@ -109,12 +122,12 @@ func accumulateGo(acc *[numTables]int32, keys []uint32) {
 
 // bestTailsGo is the portable implementation of bestTails.
 func bestTailsGo(rows []int32, acc *[numTables]int32, out []uint32) {
-	// Scaling and labelling the shared endpoint once is what lets each row cost
-	// one subtraction: (acc<<5 | t) - (row<<5) is (acc-row)<<5 | t, because the
-	// shift leaves the low five bits clear.
+	// Labelling the shared endpoint once is what lets each row cost one
+	// subtraction: (acc|t) - row is (acc-row)|t, because every cost is scaled and
+	// its low five bits are clear.
 	var scaled [numTables]int32
 	for t, v := range acc {
-		scaled[t] = v<<5 | int32(t)
+		scaled[t] = v | int32(t)
 	}
 	for i := range out {
 		row := rows[i*numTables:]
@@ -128,8 +141,9 @@ func bestTailsGo(rows []int32, acc *[numTables]int32, out []uint32) {
 	}
 }
 
-// bestTableGo is the portable implementation of bestTable. Both rows arrive
-// pre-scaled by 32, so their difference already leaves room for the table index.
+// bestTableGo is the portable implementation of bestTable. Every cost arrives
+// pre-scaled, so the difference of two rows already leaves room for the table
+// index.
 func bestTableGo(from, to *[numTables]int32) uint32 {
 	best := int32(1 << 30)
 	for t := 0; t < numTables; t++ {
@@ -145,7 +159,7 @@ func bestTableGo(from, to *[numTables]int32) uint32 {
 // unpackBest splits a bestTable result into its table and bit count. bits is
 // negative when no table can code the region.
 func unpackBest(packed uint32) (table int, cost int32) {
-	cost = int32(packed) >> 5
+	cost = int32(packed) >> costShift
 	if cost >= penalty {
 		return 0, -1
 	}

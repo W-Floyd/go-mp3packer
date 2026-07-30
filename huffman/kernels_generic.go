@@ -13,7 +13,7 @@ func bestTails(rows []int32, acc *[numTables]int32, out []uint32) {
 }
 
 // bestTable returns the cheapest table for the region between two prefix rows,
-// packed as cost<<5 | table.
+// packed as cost<<costShift | table.
 func bestTable(from, to *[numTables]int32) uint32 {
 	return bestTableGo(from, to)
 }

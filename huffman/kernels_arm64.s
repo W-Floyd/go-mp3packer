@@ -133,22 +133,14 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 
 	MOVD $·laneIndex(SB), R4
 
-	// acc and the lane labels stay in registers for the whole run: V0-V7 hold
-	// acc<<5 with the lane already folded in, so each row costs one subtract per
-	// group and the table index falls out of the minimum.
+	// acc and the lane labels stay in registers for the whole run: V0-V7 hold acc
+	// with the lane already folded in, so each row costs one subtract per group and
+	// the table index falls out of the minimum. Every cost arrives scaled, so there
+	// is nothing to shift here.
 	VLD1.P 64(R1), [V0.S4, V1.S4, V2.S4, V3.S4]
 	VLD1   (R1), [V4.S4, V5.S4, V6.S4, V7.S4]
 	VLD1.P 64(R4), [V16.S4, V17.S4, V18.S4, V19.S4]
 	VLD1   (R4), [V20.S4, V21.S4, V22.S4, V23.S4]
-
-	VSHL $5, V0.S4, V0.S4
-	VSHL $5, V1.S4, V1.S4
-	VSHL $5, V2.S4, V2.S4
-	VSHL $5, V3.S4, V3.S4
-	VSHL $5, V4.S4, V4.S4
-	VSHL $5, V5.S4, V5.S4
-	VSHL $5, V6.S4, V6.S4
-	VSHL $5, V7.S4, V7.S4
 
 	VORR V16.B16, V0.B16, V0.B16
 	VORR V17.B16, V1.B16, V1.B16
@@ -160,8 +152,8 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	VORR V23.B16, V7.B16, V7.B16
 
 // ROWMIN reduces one row against the accumulator, leaving the 32 lanes folded
-// down to four in dst. The rows are already scaled: (acc<<5 | lane) - (row<<5)
-// is (acc-row)<<5 | lane, because the shift leaves the low five bits clear.
+// down to four in dst. Every cost is scaled: (acc | lane) - row is (acc-row) |
+// lane, because the scaling leaves the low five bits clear.
 #define ROWMIN(dst)                                  \
 	VLD1.P 64(R0), [V8.S4, V9.S4, V10.S4, V11.S4]  \
 	VLD1.P 64(R0), [V12.S4, V13.S4, V14.S4, V15.S4] \

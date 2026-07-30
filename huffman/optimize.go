@@ -42,21 +42,17 @@ type scratch struct {
 	// row per slot. Only these rows are ever needed, so the search never has to
 	// materialise a cost per pair.
 	//
-	// The rows are stored pre-scaled by 32 to leave room for a table index in the
-	// low bits, which is how the kernels return the cheapest table alongside its
-	// cost; doing it once per snapshot saves a shift per row per candidate.
+	// Every cost in both of them is scaled by costShift, which the cost tables
+	// have already done: leaving room for a table index in the low bits is what
+	// lets the kernels return the cheapest table alongside its cost, and it costs
+	// the search nothing.
 	acc  [numTables]int32
 	rows [numRows * numTables]int32
 
-	// The same totals again, unscaled. The batched span kernel scales its shared
-	// endpoint itself, so handing it one of these lets the prefix search reuse it
-	// rather than need a second kernel that takes an already-scaled endpoint.
-	raw [numRows * numTables]int32
-
 	// tails[slot] is the cheapest coding of the span from that boundary up to
-	// big_values, packed as cost<<5|table. These are the only region costs that
-	// move as big_values does, so all of them are recomputed together in a single
-	// vector pass per candidate.
+	// big_values, packed as cost<<costShift|table. These are the only region
+	// costs that move as big_values does, so all of them are recomputed together
+	// in a single vector pass per candidate.
 	tails [numRows]uint32
 
 	// head[i] covers the pairs below boundary i, which does not depend on
@@ -80,16 +76,8 @@ func (sc *scratch) row(slot int) *[numTables]int32 {
 	return (*[numTables]int32)(sc.rows[slot*numTables:])
 }
 
-func (sc *scratch) rawRow(slot int) *[numTables]int32 {
-	return (*[numTables]int32)(sc.raw[slot*numTables:])
-}
-
 func (sc *scratch) snapshot(slot int) {
-	row := sc.rows[slot*numTables : (slot+1)*numTables]
-	copy(sc.raw[slot*numTables:(slot+1)*numTables], sc.acc[:])
-	for i, v := range sc.acc {
-		row[i] = v << 5
-	}
+	copy(sc.rows[slot*numTables:(slot+1)*numTables], sc.acc[:])
 }
 
 // fillHeads computes the cost of covering the pairs below each boundary up to n
@@ -119,7 +107,7 @@ func (sc *scratch) fillPrefixes(n int) {
 		// the batched kernel exists for: one call that keeps the endpoint in
 		// registers and walks the rows, instead of eight calls of which most was
 		// call overhead.
-		bestTails(sc.rows[lo*numTables:(hi+1)*numTables], sc.rawRow(j), spans[:hi-lo+1])
+		bestTails(sc.rows[lo*numTables:(hi+1)*numTables], sc.row(j), spans[:hi-lo+1])
 		for i := lo; i <= hi; i++ {
 			t0, bits0 := int(sc.head[i].table), sc.head[i].bits
 			if bits0 < 0 {

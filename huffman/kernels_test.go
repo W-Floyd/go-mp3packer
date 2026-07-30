@@ -1,13 +1,17 @@
 package huffman
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 )
 
 // TestPairCostTableMatchesDirectCost pins the precomputed cost tables to the
 // straightforward per-pair calculation, for every table and a wide spread of
-// magnitudes including every escape boundary.
+// magnitudes including every escape boundary. Both tables hold their costs scaled
+// by costShift, so the comparison unscales; that the shift is exact — no cost
+// with a bit set below it — is part of what is being checked, since a stray low
+// bit would read as a table index.
 func TestPairCostTableMatchesDirectCost(t *testing.T) {
 	values := []int{0, 1, 2, 3, 5, 7, 14, 15, 16, 17, 22, 30, 31, 46, 78, 142, 270, 526, 2062, 8205, 8206}
 	for _, x := range values {
@@ -17,7 +21,12 @@ func TestPairCostTableMatchesDirectCost(t *testing.T) {
 				base := &pairCostTable[key&0xFF]
 				esc := &escapeCostTable[key>>8&0xF]
 				for tab := 0; tab < numTables; tab++ {
-					got := base[tab] + esc[tab]
+					scaled := base[tab] + esc[tab]
+					if scaled&(1<<costShift-1) != 0 {
+						t.Fatalf("table %d, pair (%d,%d): cost %d is not a multiple of %d",
+							tab, sx*x, y, scaled, 1<<costShift)
+					}
+					got := scaled >> costShift
 					want := pairCost(tab, sx*x, y)
 					if want < 0 {
 						if got < penalty {
@@ -37,12 +46,14 @@ func TestPairCostTableMatchesDirectCost(t *testing.T) {
 }
 
 // TestCostSumsCannotReachPenalty checks the headroom the penalty scheme relies
-// on: a full granule of the most expensive legal pairs must stay below it.
+// on at both ends: a full granule of the most expensive legal pairs must stay
+// below the penalty, and a full granule of penalties must still fit an int32 once
+// scaled, which is what the accumulator and every row hold.
 func TestCostSumsCannotReachPenalty(t *testing.T) {
 	worst := 0
 	for sym := 0; sym < 256; sym++ {
 		for tab := 0; tab < numTables; tab++ {
-			if c := pairCostTable[sym][tab]; c < penalty && int(c) > worst {
+			if c := pairCostTable[sym][tab] >> costShift; c < penalty && int(c) > worst {
 				worst = int(c)
 			}
 		}
@@ -53,6 +64,11 @@ func TestCostSumsCannotReachPenalty(t *testing.T) {
 	if total := MaxBigValues * maxPairBits; total >= penalty {
 		t.Errorf("a granule can legitimately cost %d bits, which the penalty of %d cannot exceed",
 			total, penalty)
+	}
+	// The worst a lane can accumulate is every pair unrepresentable in both cost
+	// tables at once, and it has to survive being scaled.
+	if worst := int64(MaxBigValues) * 2 * penalty << costShift; worst > math.MaxInt32 {
+		t.Errorf("a lane can reach %d once scaled, which an int32 cannot hold", worst)
 	}
 }
 
@@ -129,11 +145,14 @@ func TestKernelsMatchPortable(t *testing.T) {
 			acc := randomRow(rng, scale*int32(n))
 			rows := make([]int32, n*numTables)
 			for i := 0; i < n; i++ {
-				// Prefix sums only grow, never past the accumulator, and the rows
-				// are stored pre-scaled while the accumulator is not.
+				// Prefix sums only grow and never pass the accumulator, and every
+				// cost is scaled, endpoint included.
 				for t := range acc {
 					rows[i*numTables+t] = rng.Int31n(acc[t]+1) * 32
 				}
+			}
+			for t := range acc {
+				acc[t] *= 32
 			}
 			got := make([]uint32, n)
 			want := make([]uint32, n)
@@ -188,6 +207,9 @@ func BenchmarkKernelBestTails(b *testing.B) {
 	rows := make([]int32, n*numTables)
 	for i := range rows {
 		rows[i] = rng.Int31n(1<<12) * 32
+	}
+	for t := range acc {
+		acc[t] *= 32 // the endpoint is scaled like every other cost
 	}
 	out := make([]uint32, n)
 	b.Run("asm", func(b *testing.B) {
