@@ -85,6 +85,63 @@ func randomSpectrum(rng *rand.Rand, peak int) Spectrum {
 	return s
 }
 
+// TestPairTablesMatchTheTree holds the big-value probe to the trees it was built
+// from, for every table and every prefix: the decoder trusts it for 99% of the
+// symbols it reads, and a single wrong entry would silently decode a pair to the
+// wrong magnitudes. The walk here is the plain definition, one bit at a time from
+// the root, with no reference to how the table is packed.
+func TestPairTablesMatchTheTree(t *testing.T) {
+	for idx := range pairTables {
+		tree := tables[idx].tree
+		for prefix := 0; prefix < pairSize; prefix++ {
+			e := pairTables[idx][prefix]
+
+			node, used, sym, done := 0, 0, 0, false
+			for len(tree) > 0 {
+				v := tree[node]
+				if v >= 0 {
+					sym, done = int(v)&0xFF, true
+					break
+				}
+				if used == pairBits {
+					break // no codeword this short: the entry must say so
+				}
+				node++
+				if prefix&(1<<uint(pairBits-1-used)) != 0 {
+					node -= int(v)
+				}
+				used++
+				if node >= len(tree) {
+					break // undefined table, which only the walk may discover
+				}
+			}
+
+			if !done {
+				if !e.isSlow() {
+					t.Fatalf("table %d prefix %0*b: entry resolves a pair the tree does not",
+						idx, pairBits, prefix)
+				}
+				continue
+			}
+			if e.isSlow() {
+				t.Fatalf("table %d prefix %0*b: entry defers a %d-bit codeword the tree resolves",
+					idx, pairBits, prefix, used)
+			}
+			x, y := sym>>4, sym&0xF
+			if e.x() != x || e.y() != y || e.length() != used {
+				t.Fatalf("table %d prefix %0*b: entry gives (%d,%d) in %d bits, tree gives (%d,%d) in %d",
+					idx, pairBits, prefix, e.x(), e.y(), e.length(), x, y, used)
+			}
+			// The sign counts are what the decoder advances the bit window by, so a
+			// wrong one desynchronises the whole region rather than one pair.
+			if e.nx() != uint(b2u(x != 0)) || e.ny() != uint(b2u(y != 0)) {
+				t.Fatalf("table %d prefix %0*b: pair (%d,%d) carries sign counts %d and %d",
+					idx, pairBits, prefix, x, y, e.nx(), e.ny())
+			}
+		}
+	}
+}
+
 func TestOptimizeRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	rates := []int{44100, 48000, 32000, 24000, 22050, 8000}

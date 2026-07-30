@@ -31,12 +31,53 @@ func (e decodeEntry) symbol() int  { return int(e) & 0xFF }
 func (e decodeEntry) length() int  { return int(e>>8) & 0x1F }
 func (e decodeEntry) node() int    { return int(e >> 16) }
 
+// pairBits is how many bits of the stream index the big-value probe, and it was
+// chosen by measurement rather than by coverage. On real material 92% of
+// codewords are eight bits or fewer, 99.0% ten or fewer and 99.9% eleven, but the
+// table has to stay small enough to sit in L1 next to everything else the search
+// is touching: one worker's repack of the long track came out 4.1% faster than the
+// eight-bit table at nine bits, 8.6% at ten, 8.4% at eleven and only 6.0% at
+// twelve. Ten it is — the same as eleven for half the footprint, and the wider
+// tables lose to their own cache misses however much of the tail they cover.
+const (
+	pairBits = 10
+	pairSize = 1 << pairBits
+)
+
+// pairEntry is a resolved big-value pair: not the symbol, but the two magnitudes
+// the symbol stands for, so that the decoder's per-symbol work is one load rather
+// than a load of the symbol followed by a dependent load of its split. That
+// second load was worth more than the width of the table — folding it in is 14.6%
+// off a granule decode where widening alone was 4.6%.
+//
+// Magnitudes are the clamped 0..15 the code table encodes, x in bits 0..3 and y
+// in 4..7, the codeword length in 8..11, and each magnitude's sign-bit count in
+// 12 and 13. pairSlow marks a prefix no codeword of pairBits bits or fewer
+// resolves, which the tree walk then handles from the root.
+type pairEntry uint16
+
+const pairSlow = 1 << 15
+
+func (e pairEntry) x() int       { return int(e) & 0xF }
+func (e pairEntry) y() int       { return int(e>>4) & 0xF }
+func (e pairEntry) length() int  { return int(e>>8) & 0xF }
+func (e pairEntry) nx() uint     { return uint(e>>12) & 1 }
+func (e pairEntry) ny() uint     { return uint(e>>13) & 1 }
+func (e pairEntry) isSlow() bool { return e >= pairSlow }
+
 var (
 	encodeTables [34]encodeTable
 
-	// decodeTables[table][first 8 bits] short-circuits the tree walk. Most
-	// codewords are eight bits or fewer, so most symbols cost one lookup.
+	// decodeTables[table][first 8 bits] short-circuits the tree walk. The
+	// big-value regions go through pairTables instead; what is left for this one is
+	// the count1 tail, whose codewords are six bits at most and so always resolve
+	// in the one lookup.
 	decodeTables [34][256]decodeEntry
+
+	// pairTables[table][first pairBits bits] resolves a big-value pair. Only the
+	// 32 selectable big-value tables have one; the count1 tables are not indexed
+	// here.
+	pairTables [32][pairSize]pairEntry
 	// maxQuant is the largest absolute coefficient a table can represent, or -1
 	// for the two undefined tables, which must never be selected.
 	maxQuant [34]int
@@ -108,6 +149,50 @@ func init() {
 		encodeTables[i] = buildEncodeTable(i)
 		maxQuant[i] = tableMaxQuant(i, &encodeTables[i])
 		buildDecodeTable(i, &decodeTables[i])
+		if i < len(pairTables) {
+			buildPairTable(i, &pairTables[i])
+		}
+	}
+}
+
+// buildPairTable walks every pairBits-wide prefix through the decode tree and
+// records the pair it resolves to. A prefix the walk cannot finish in that many
+// bits is marked slow, and so is one that runs off the end of the tree — which
+// only the two tables the standard leaves undefined can do, and which the walk has
+// to reach for itself to report the failure.
+func buildPairTable(idx int, out *[pairSize]pairEntry) {
+	tree := tables[idx].tree
+	if len(tree) == 0 {
+		for i := range out {
+			out[i] = pairSlow
+		}
+		return
+	}
+	for prefix := 0; prefix < pairSize; prefix++ {
+		node, used := 0, 0
+		for {
+			v := tree[node]
+			if v >= 0 {
+				sym := int(v) & 0xFF
+				x, y := sym>>4, sym&0xF
+				out[prefix] = pairEntry(x) | pairEntry(y)<<4 | pairEntry(used)<<8 |
+					pairEntry(b2u(x != 0))<<12 | pairEntry(b2u(y != 0))<<13
+				break
+			}
+			if used == pairBits {
+				out[prefix] = pairSlow
+				break
+			}
+			node++
+			if prefix&(1<<uint(pairBits-1-used)) != 0 {
+				node -= int(v)
+			}
+			used++
+			if node >= len(tree) {
+				out[prefix] = pairSlow
+				break
+			}
+		}
 	}
 }
 

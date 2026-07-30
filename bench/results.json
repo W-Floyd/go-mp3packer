@@ -16,7 +16,7 @@
   },
   "tolerance": 0.005,
   "minRounds": 5,
-  "session": 10,
+  "session": 17,
   "inputs": [
     {
       "id": "short",
@@ -10868,6 +10868,1849 @@
               "ns": 12890192,
               "session": 7,
               "pass": 28
+            }
+          ]
+        }
+      }
+    },
+    {
+      "commit": "cb9bab4",
+      "label": "perf: scale the cost tables once, not every prefix row",
+      "tables": null,
+      "cells": {
+        "long1": {
+          "runs": [
+            {
+              "ns": 177803875,
+              "session": 11,
+              "pass": 1
+            },
+            {
+              "ns": 180603854,
+              "session": 11,
+              "pass": 2
+            },
+            {
+              "ns": 182373562,
+              "session": 11,
+              "pass": 3
+            },
+            {
+              "ns": 185954771,
+              "session": 11,
+              "pass": 4
+            },
+            {
+              "ns": 183601042,
+              "session": 11,
+              "pass": 5
+            },
+            {
+              "ns": 182402208,
+              "session": 11,
+              "pass": 6
+            },
+            {
+              "ns": 184114584,
+              "session": 11,
+              "pass": 7
+            },
+            {
+              "ns": 185276938,
+              "session": 11,
+              "pass": 8
+            },
+            {
+              "ns": 186215479,
+              "session": 11,
+              "pass": 9
+            },
+            {
+              "ns": 180350854,
+              "session": 11,
+              "pass": 10
+            },
+            {
+              "ns": 184323500,
+              "session": 11,
+              "pass": 11
+            },
+            {
+              "ns": 179813854,
+              "session": 11,
+              "pass": 12
+            },
+            {
+              "ns": 181545208,
+              "session": 11,
+              "pass": 13
+            },
+            {
+              "ns": 185786520,
+              "session": 11,
+              "pass": 14
+            },
+            {
+              "ns": 182373334,
+              "session": 11,
+              "pass": 15
+            },
+            {
+              "ns": 183437750,
+              "session": 11,
+              "pass": 16
+            },
+            {
+              "ns": 182538708,
+              "session": 15,
+              "pass": 1
+            },
+            {
+              "ns": 181584125,
+              "session": 15,
+              "pass": 2
+            },
+            {
+              "ns": 185881500,
+              "session": 15,
+              "pass": 3
+            },
+            {
+              "ns": 178513875,
+              "session": 15,
+              "pass": 4
+            },
+            {
+              "ns": 178633875,
+              "session": 15,
+              "pass": 5
+            },
+            {
+              "ns": 178485938,
+              "session": 15,
+              "pass": 6
+            },
+            {
+              "ns": 177317708,
+              "session": 15,
+              "pass": 7
+            },
+            {
+              "ns": 178191312,
+              "session": 15,
+              "pass": 8
+            },
+            {
+              "ns": 180338208,
+              "session": 15,
+              "pass": 9
+            },
+            {
+              "ns": 177627667,
+              "session": 15,
+              "pass": 10
+            }
+          ]
+        },
+        "longall": {
+          "runs": [
+            {
+              "ns": 18366278,
+              "session": 12,
+              "pass": 1
+            },
+            {
+              "ns": 18305575,
+              "session": 12,
+              "pass": 2
+            },
+            {
+              "ns": 18310214,
+              "session": 12,
+              "pass": 3
+            },
+            {
+              "ns": 18350047,
+              "session": 12,
+              "pass": 4
+            },
+            {
+              "ns": 18139564,
+              "session": 12,
+              "pass": 5
+            },
+            {
+              "ns": 17908219,
+              "session": 16,
+              "pass": 1
+            },
+            {
+              "ns": 18066056,
+              "session": 16,
+              "pass": 2
+            },
+            {
+              "ns": 18682433,
+              "session": 16,
+              "pass": 3
+            },
+            {
+              "ns": 18375033,
+              "session": 16,
+              "pass": 4
+            },
+            {
+              "ns": 18270544,
+              "session": 16,
+              "pass": 5
+            },
+            {
+              "ns": 18315725,
+              "session": 16,
+              "pass": 6
+            },
+            {
+              "ns": 18514131,
+              "session": 16,
+              "pass": 7
+            },
+            {
+              "ns": 19787044,
+              "session": 16,
+              "pass": 8
+            },
+            {
+              "ns": 19034828,
+              "session": 16,
+              "pass": 9
+            },
+            {
+              "ns": 18119097,
+              "session": 16,
+              "pass": 10
+            },
+            {
+              "ns": 17916217,
+              "session": 16,
+              "pass": 11
+            },
+            {
+              "ns": 17815289,
+              "session": 16,
+              "pass": 12
+            },
+            {
+              "ns": 17580992,
+              "session": 16,
+              "pass": 13
+            },
+            {
+              "ns": 18353567,
+              "session": 16,
+              "pass": 14
+            },
+            {
+              "ns": 18202381,
+              "session": 16,
+              "pass": 15
+            },
+            {
+              "ns": 18453817,
+              "session": 16,
+              "pass": 16
+            },
+            {
+              "ns": 18946467,
+              "session": 16,
+              "pass": 17
+            },
+            {
+              "ns": 18916911,
+              "session": 16,
+              "pass": 18
+            },
+            {
+              "ns": 17935669,
+              "session": 16,
+              "pass": 19
+            },
+            {
+              "ns": 18771919,
+              "session": 16,
+              "pass": 20
+            },
+            {
+              "ns": 18106631,
+              "session": 16,
+              "pass": 21
+            },
+            {
+              "ns": 18433428,
+              "session": 16,
+              "pass": 22
+            },
+            {
+              "ns": 17936119,
+              "session": 16,
+              "pass": 23
+            },
+            {
+              "ns": 18277661,
+              "session": 16,
+              "pass": 24
+            },
+            {
+              "ns": 17686064,
+              "session": 16,
+              "pass": 25
+            },
+            {
+              "ns": 17789858,
+              "session": 16,
+              "pass": 26
+            },
+            {
+              "ns": 17582728,
+              "session": 16,
+              "pass": 27
+            },
+            {
+              "ns": 17956142,
+              "session": 16,
+              "pass": 28
+            },
+            {
+              "ns": 17578539,
+              "session": 16,
+              "pass": 29
+            },
+            {
+              "ns": 17942903,
+              "session": 16,
+              "pass": 30
+            },
+            {
+              "ns": 17689086,
+              "session": 16,
+              "pass": 31
+            },
+            {
+              "ns": 18018031,
+              "session": 16,
+              "pass": 32
+            },
+            {
+              "ns": 17677906,
+              "session": 16,
+              "pass": 33
+            },
+            {
+              "ns": 17788547,
+              "session": 16,
+              "pass": 34
+            },
+            {
+              "ns": 17946936,
+              "session": 16,
+              "pass": 35
+            },
+            {
+              "ns": 18149808,
+              "session": 16,
+              "pass": 36
+            },
+            {
+              "ns": 18430097,
+              "session": 16,
+              "pass": 37
+            },
+            {
+              "ns": 19000386,
+              "session": 16,
+              "pass": 38
+            },
+            {
+              "ns": 17928636,
+              "session": 16,
+              "pass": 39
+            },
+            {
+              "ns": 18789867,
+              "session": 16,
+              "pass": 40
+            },
+            {
+              "ns": 17594161,
+              "session": 16,
+              "pass": 41
+            },
+            {
+              "ns": 17959450,
+              "session": 16,
+              "pass": 42
+            },
+            {
+              "ns": 17822892,
+              "session": 16,
+              "pass": 43
+            },
+            {
+              "ns": 17621833,
+              "session": 16,
+              "pass": 44
+            },
+            {
+              "ns": 17651603,
+              "session": 16,
+              "pass": 45
+            },
+            {
+              "ns": 18796081,
+              "session": 16,
+              "pass": 46
+            },
+            {
+              "ns": 17812233,
+              "session": 16,
+              "pass": 47
+            },
+            {
+              "ns": 17561375,
+              "session": 16,
+              "pass": 48
+            },
+            {
+              "ns": 17500508,
+              "session": 16,
+              "pass": 49
+            },
+            {
+              "ns": 18239406,
+              "session": 16,
+              "pass": 50
+            },
+            {
+              "ns": 17594722,
+              "session": 16,
+              "pass": 51
+            },
+            {
+              "ns": 18638619,
+              "session": 16,
+              "pass": 52
+            },
+            {
+              "ns": 18068450,
+              "session": 16,
+              "pass": 53
+            },
+            {
+              "ns": 17665311,
+              "session": 16,
+              "pass": 54
+            },
+            {
+              "ns": 18052092,
+              "session": 16,
+              "pass": 55
+            },
+            {
+              "ns": 17759886,
+              "session": 16,
+              "pass": 56
+            },
+            {
+              "ns": 17609819,
+              "session": 16,
+              "pass": 57
+            },
+            {
+              "ns": 17669169,
+              "session": 16,
+              "pass": 58
+            },
+            {
+              "ns": 18260792,
+              "session": 16,
+              "pass": 59
+            },
+            {
+              "ns": 17548128,
+              "session": 16,
+              "pass": 60
+            },
+            {
+              "ns": 17826567,
+              "session": 16,
+              "pass": 61
+            },
+            {
+              "ns": 17652022,
+              "session": 16,
+              "pass": 62
+            },
+            {
+              "ns": 18240389,
+              "session": 16,
+              "pass": 63
+            },
+            {
+              "ns": 18332269,
+              "session": 16,
+              "pass": 64
+            }
+          ]
+        },
+        "serial": {
+          "runs": [
+            {
+              "ns": 2325789,
+              "session": 14,
+              "pass": 1
+            },
+            {
+              "ns": 2321679,
+              "session": 14,
+              "pass": 2
+            },
+            {
+              "ns": 2349104,
+              "session": 14,
+              "pass": 3
+            },
+            {
+              "ns": 2280067,
+              "session": 14,
+              "pass": 4
+            },
+            {
+              "ns": 2583722,
+              "session": 14,
+              "pass": 5
+            },
+            {
+              "ns": 2312842,
+              "session": 14,
+              "pass": 6
+            },
+            {
+              "ns": 2245254,
+              "session": 14,
+              "pass": 7
+            },
+            {
+              "ns": 2302965,
+              "session": 14,
+              "pass": 8
+            },
+            {
+              "ns": 2300353,
+              "session": 14,
+              "pass": 9
+            },
+            {
+              "ns": 2338819,
+              "session": 14,
+              "pass": 10
+            },
+            {
+              "ns": 2273110,
+              "session": 14,
+              "pass": 11
+            },
+            {
+              "ns": 2334664,
+              "session": 14,
+              "pass": 12
+            },
+            {
+              "ns": 2476961,
+              "session": 14,
+              "pass": 13
+            },
+            {
+              "ns": 2450312,
+              "session": 14,
+              "pass": 14
+            },
+            {
+              "ns": 2306839,
+              "session": 14,
+              "pass": 15
+            },
+            {
+              "ns": 2371488,
+              "session": 14,
+              "pass": 16
+            },
+            {
+              "ns": 2410549,
+              "session": 14,
+              "pass": 17
+            },
+            {
+              "ns": 2381444,
+              "session": 14,
+              "pass": 18
+            },
+            {
+              "ns": 2263868,
+              "session": 14,
+              "pass": 19
+            },
+            {
+              "ns": 2323057,
+              "session": 14,
+              "pass": 20
+            },
+            {
+              "ns": 2341022,
+              "session": 14,
+              "pass": 21
+            },
+            {
+              "ns": 2311779,
+              "session": 14,
+              "pass": 22
+            },
+            {
+              "ns": 2274401,
+              "session": 14,
+              "pass": 23
+            },
+            {
+              "ns": 2326649,
+              "session": 14,
+              "pass": 24
+            },
+            {
+              "ns": 2276293,
+              "session": 14,
+              "pass": 25
+            },
+            {
+              "ns": 2281362,
+              "session": 14,
+              "pass": 26
+            },
+            {
+              "ns": 2275031,
+              "session": 14,
+              "pass": 27
+            },
+            {
+              "ns": 2458261,
+              "session": 14,
+              "pass": 28
+            },
+            {
+              "ns": 2376060,
+              "session": 14,
+              "pass": 29
+            },
+            {
+              "ns": 2278614,
+              "session": 14,
+              "pass": 30
+            },
+            {
+              "ns": 2320667,
+              "session": 14,
+              "pass": 31
+            },
+            {
+              "ns": 2280731,
+              "session": 14,
+              "pass": 32
+            },
+            {
+              "ns": 2258701,
+              "session": 14,
+              "pass": 33
+            },
+            {
+              "ns": 2300712,
+              "session": 14,
+              "pass": 34
+            },
+            {
+              "ns": 2395350,
+              "session": 14,
+              "pass": 35
+            },
+            {
+              "ns": 2374240,
+              "session": 14,
+              "pass": 36
+            },
+            {
+              "ns": 2321897,
+              "session": 14,
+              "pass": 37
+            },
+            {
+              "ns": 2255164,
+              "session": 14,
+              "pass": 38
+            },
+            {
+              "ns": 2265188,
+              "session": 14,
+              "pass": 39
+            },
+            {
+              "ns": 2378978,
+              "session": 14,
+              "pass": 40
+            },
+            {
+              "ns": 2277426,
+              "session": 14,
+              "pass": 41
+            },
+            {
+              "ns": 2725161,
+              "session": 14,
+              "pass": 42
+            },
+            {
+              "ns": 2496506,
+              "session": 14,
+              "pass": 43
+            },
+            {
+              "ns": 2309374,
+              "session": 14,
+              "pass": 44
+            },
+            {
+              "ns": 2264176,
+              "session": 14,
+              "pass": 45
+            },
+            {
+              "ns": 2292038,
+              "session": 14,
+              "pass": 46
+            },
+            {
+              "ns": 2280653,
+              "session": 14,
+              "pass": 47
+            },
+            {
+              "ns": 2236746,
+              "session": 14,
+              "pass": 48
+            },
+            {
+              "ns": 2247599,
+              "session": 14,
+              "pass": 49
+            },
+            {
+              "ns": 2229068,
+              "session": 14,
+              "pass": 50
+            },
+            {
+              "ns": 2228017,
+              "session": 14,
+              "pass": 51
+            },
+            {
+              "ns": 2335950,
+              "session": 14,
+              "pass": 52
+            },
+            {
+              "ns": 2314853,
+              "session": 14,
+              "pass": 53
+            },
+            {
+              "ns": 2280474,
+              "session": 14,
+              "pass": 54
+            },
+            {
+              "ns": 2305212,
+              "session": 14,
+              "pass": 55
+            },
+            {
+              "ns": 2283751,
+              "session": 14,
+              "pass": 56
+            },
+            {
+              "ns": 2412511,
+              "session": 14,
+              "pass": 57
+            },
+            {
+              "ns": 2436264,
+              "session": 14,
+              "pass": 58
+            },
+            {
+              "ns": 2256472,
+              "session": 14,
+              "pass": 59
+            },
+            {
+              "ns": 2297565,
+              "session": 14,
+              "pass": 60
+            },
+            {
+              "ns": 2306844,
+              "session": 14,
+              "pass": 61
+            },
+            {
+              "ns": 2222161,
+              "session": 14,
+              "pass": 62
+            },
+            {
+              "ns": 2268406,
+              "session": 14,
+              "pass": 63
+            },
+            {
+              "ns": 2311736,
+              "session": 14,
+              "pass": 64
+            },
+            {
+              "ns": 2288156,
+              "session": 14,
+              "pass": 65
+            },
+            {
+              "ns": 2221542,
+              "session": 14,
+              "pass": 66
+            },
+            {
+              "ns": 2322365,
+              "session": 14,
+              "pass": 67
+            },
+            {
+              "ns": 2486008,
+              "session": 14,
+              "pass": 68
+            },
+            {
+              "ns": 2333476,
+              "session": 14,
+              "pass": 69
+            },
+            {
+              "ns": 2401712,
+              "session": 14,
+              "pass": 70
+            },
+            {
+              "ns": 2387649,
+              "session": 14,
+              "pass": 71
+            },
+            {
+              "ns": 2329390,
+              "session": 14,
+              "pass": 72
+            },
+            {
+              "ns": 2315061,
+              "session": 14,
+              "pass": 73
+            },
+            {
+              "ns": 2281276,
+              "session": 14,
+              "pass": 74
+            },
+            {
+              "ns": 2392217,
+              "session": 14,
+              "pass": 75
+            },
+            {
+              "ns": 2370153,
+              "session": 14,
+              "pass": 76
+            },
+            {
+              "ns": 2347910,
+              "session": 14,
+              "pass": 77
+            },
+            {
+              "ns": 2345810,
+              "session": 14,
+              "pass": 78
+            },
+            {
+              "ns": 2349144,
+              "session": 14,
+              "pass": 79
+            },
+            {
+              "ns": 2442296,
+              "session": 14,
+              "pass": 80
+            },
+            {
+              "ns": 2291201,
+              "session": 14,
+              "pass": 81
+            },
+            {
+              "ns": 2300312,
+              "session": 14,
+              "pass": 82
+            },
+            {
+              "ns": 2270094,
+              "session": 14,
+              "pass": 83
+            },
+            {
+              "ns": 2512962,
+              "session": 14,
+              "pass": 84
+            },
+            {
+              "ns": 2369889,
+              "session": 14,
+              "pass": 85
+            },
+            {
+              "ns": 2292839,
+              "session": 14,
+              "pass": 86
+            },
+            {
+              "ns": 2303589,
+              "session": 14,
+              "pass": 87
+            },
+            {
+              "ns": 2309731,
+              "session": 14,
+              "pass": 88
+            },
+            {
+              "ns": 2360079,
+              "session": 14,
+              "pass": 89
+            },
+            {
+              "ns": 2299796,
+              "session": 14,
+              "pass": 90
+            },
+            {
+              "ns": 2418272,
+              "session": 14,
+              "pass": 91
+            },
+            {
+              "ns": 2237617,
+              "session": 14,
+              "pass": 92
+            },
+            {
+              "ns": 2251028,
+              "session": 14,
+              "pass": 93
+            },
+            {
+              "ns": 2339222,
+              "session": 14,
+              "pass": 94
+            },
+            {
+              "ns": 2257618,
+              "session": 14,
+              "pass": 95
+            },
+            {
+              "ns": 2289590,
+              "session": 14,
+              "pass": 96
+            },
+            {
+              "ns": 2227447,
+              "session": 14,
+              "pass": 97
+            },
+            {
+              "ns": 2266524,
+              "session": 14,
+              "pass": 98
+            },
+            {
+              "ns": 2226797,
+              "session": 14,
+              "pass": 99
+            },
+            {
+              "ns": 2441053,
+              "session": 14,
+              "pass": 100
+            },
+            {
+              "ns": 2365383,
+              "session": 14,
+              "pass": 101
+            },
+            {
+              "ns": 2353736,
+              "session": 14,
+              "pass": 102
+            },
+            {
+              "ns": 2305049,
+              "session": 14,
+              "pass": 103
+            },
+            {
+              "ns": 2363856,
+              "session": 14,
+              "pass": 104
+            },
+            {
+              "ns": 2334449,
+              "session": 14,
+              "pass": 105
+            },
+            {
+              "ns": 2352100,
+              "session": 14,
+              "pass": 106
+            },
+            {
+              "ns": 2342822,
+              "session": 14,
+              "pass": 107
+            },
+            {
+              "ns": 2392718,
+              "session": 14,
+              "pass": 108
+            },
+            {
+              "ns": 2347907,
+              "session": 14,
+              "pass": 109
+            },
+            {
+              "ns": 2312600,
+              "session": 14,
+              "pass": 110
+            },
+            {
+              "ns": 2446143,
+              "session": 14,
+              "pass": 111
+            },
+            {
+              "ns": 2391164,
+              "session": 14,
+              "pass": 112
+            },
+            {
+              "ns": 2384528,
+              "session": 14,
+              "pass": 113
+            },
+            {
+              "ns": 2346254,
+              "session": 14,
+              "pass": 114
+            },
+            {
+              "ns": 2342226,
+              "session": 14,
+              "pass": 115
+            },
+            {
+              "ns": 2291043,
+              "session": 14,
+              "pass": 116
+            },
+            {
+              "ns": 2395476,
+              "session": 14,
+              "pass": 117
+            },
+            {
+              "ns": 2309825,
+              "session": 14,
+              "pass": 118
+            },
+            {
+              "ns": 2284649,
+              "session": 14,
+              "pass": 119
+            },
+            {
+              "ns": 2380010,
+              "session": 14,
+              "pass": 120
+            },
+            {
+              "ns": 2637719,
+              "session": 14,
+              "pass": 121
+            },
+            {
+              "ns": 2986626,
+              "session": 14,
+              "pass": 122
+            },
+            {
+              "ns": 2438424,
+              "session": 14,
+              "pass": 123
+            },
+            {
+              "ns": 2662251,
+              "session": 14,
+              "pass": 124
+            },
+            {
+              "ns": 2420200,
+              "session": 14,
+              "pass": 125
+            },
+            {
+              "ns": 2308004,
+              "session": 14,
+              "pass": 126
+            },
+            {
+              "ns": 2405574,
+              "session": 14,
+              "pass": 127
+            },
+            {
+              "ns": 2454510,
+              "session": 14,
+              "pass": 128
+            },
+            {
+              "ns": 2374750,
+              "session": 14,
+              "pass": 129
+            },
+            {
+              "ns": 2317825,
+              "session": 14,
+              "pass": 130
+            },
+            {
+              "ns": 2309017,
+              "session": 14,
+              "pass": 131
+            },
+            {
+              "ns": 2292615,
+              "session": 14,
+              "pass": 132
+            },
+            {
+              "ns": 2321569,
+              "session": 14,
+              "pass": 133
+            },
+            {
+              "ns": 2346154,
+              "session": 14,
+              "pass": 134
+            },
+            {
+              "ns": 2330760,
+              "session": 14,
+              "pass": 135
+            },
+            {
+              "ns": 2402958,
+              "session": 14,
+              "pass": 136
+            },
+            {
+              "ns": 2473110,
+              "session": 14,
+              "pass": 137
+            },
+            {
+              "ns": 2386222,
+              "session": 14,
+              "pass": 138
+            },
+            {
+              "ns": 2388799,
+              "session": 14,
+              "pass": 139
+            },
+            {
+              "ns": 2449296,
+              "session": 14,
+              "pass": 140
+            },
+            {
+              "ns": 2349553,
+              "session": 14,
+              "pass": 141
+            },
+            {
+              "ns": 2314011,
+              "session": 14,
+              "pass": 142
+            },
+            {
+              "ns": 2315317,
+              "session": 14,
+              "pass": 143
+            },
+            {
+              "ns": 2312814,
+              "session": 14,
+              "pass": 144
+            },
+            {
+              "ns": 2412818,
+              "session": 14,
+              "pass": 145
+            },
+            {
+              "ns": 2433776,
+              "session": 14,
+              "pass": 146
+            },
+            {
+              "ns": 2323453,
+              "session": 14,
+              "pass": 147
+            },
+            {
+              "ns": 2290657,
+              "session": 14,
+              "pass": 148
+            },
+            {
+              "ns": 2292835,
+              "session": 14,
+              "pass": 149
+            },
+            {
+              "ns": 2286500,
+              "session": 14,
+              "pass": 150
+            },
+            {
+              "ns": 2261317,
+              "session": 14,
+              "pass": 151
+            },
+            {
+              "ns": 2297456,
+              "session": 14,
+              "pass": 152
+            },
+            {
+              "ns": 2379860,
+              "session": 14,
+              "pass": 153
+            },
+            {
+              "ns": 2441451,
+              "session": 14,
+              "pass": 154
+            },
+            {
+              "ns": 2316044,
+              "session": 14,
+              "pass": 155
+            },
+            {
+              "ns": 2384724,
+              "session": 14,
+              "pass": 156
+            },
+            {
+              "ns": 2365776,
+              "session": 14,
+              "pass": 157
+            },
+            {
+              "ns": 2371047,
+              "session": 14,
+              "pass": 158
+            },
+            {
+              "ns": 2421768,
+              "session": 14,
+              "pass": 159
+            },
+            {
+              "ns": 2330238,
+              "session": 14,
+              "pass": 160
+            },
+            {
+              "ns": 2334758,
+              "session": 14,
+              "pass": 161
+            },
+            {
+              "ns": 2304654,
+              "session": 14,
+              "pass": 162
+            },
+            {
+              "ns": 2343406,
+              "session": 14,
+              "pass": 163
+            },
+            {
+              "ns": 2437019,
+              "session": 14,
+              "pass": 164
+            },
+            {
+              "ns": 2349938,
+              "session": 14,
+              "pass": 165
+            },
+            {
+              "ns": 2293579,
+              "session": 14,
+              "pass": 166
+            },
+            {
+              "ns": 2362564,
+              "session": 14,
+              "pass": 167
+            },
+            {
+              "ns": 2355981,
+              "session": 14,
+              "pass": 168
+            },
+            {
+              "ns": 2294522,
+              "session": 14,
+              "pass": 169
+            },
+            {
+              "ns": 2305454,
+              "session": 14,
+              "pass": 170
+            },
+            {
+              "ns": 2322174,
+              "session": 14,
+              "pass": 171
+            },
+            {
+              "ns": 2340782,
+              "session": 14,
+              "pass": 172
+            },
+            {
+              "ns": 2325046,
+              "session": 14,
+              "pass": 173
+            },
+            {
+              "ns": 2367633,
+              "session": 14,
+              "pass": 174
+            },
+            {
+              "ns": 2415618,
+              "session": 14,
+              "pass": 175
+            },
+            {
+              "ns": 2348847,
+              "session": 14,
+              "pass": 176
+            },
+            {
+              "ns": 2264065,
+              "session": 14,
+              "pass": 177
+            },
+            {
+              "ns": 2240135,
+              "session": 14,
+              "pass": 178
+            },
+            {
+              "ns": 2245721,
+              "session": 14,
+              "pass": 179
+            },
+            {
+              "ns": 2280243,
+              "session": 14,
+              "pass": 180
+            },
+            {
+              "ns": 2272914,
+              "session": 14,
+              "pass": 181
+            },
+            {
+              "ns": 2356392,
+              "session": 14,
+              "pass": 182
+            },
+            {
+              "ns": 2465544,
+              "session": 14,
+              "pass": 183
+            },
+            {
+              "ns": 2333454,
+              "session": 14,
+              "pass": 184
+            },
+            {
+              "ns": 2332326,
+              "session": 14,
+              "pass": 185
+            },
+            {
+              "ns": 2341576,
+              "session": 14,
+              "pass": 186
+            },
+            {
+              "ns": 2310978,
+              "session": 14,
+              "pass": 187
+            },
+            {
+              "ns": 2353669,
+              "session": 14,
+              "pass": 188
+            },
+            {
+              "ns": 2365114,
+              "session": 14,
+              "pass": 189
+            },
+            {
+              "ns": 2452724,
+              "session": 14,
+              "pass": 190
+            },
+            {
+              "ns": 2341901,
+              "session": 14,
+              "pass": 191
+            },
+            {
+              "ns": 2350906,
+              "session": 14,
+              "pass": 192
+            },
+            {
+              "ns": 2320478,
+              "session": 14,
+              "pass": 193
+            },
+            {
+              "ns": 2262718,
+              "session": 14,
+              "pass": 194
+            },
+            {
+              "ns": 2276051,
+              "session": 14,
+              "pass": 195
+            },
+            {
+              "ns": 2342408,
+              "session": 14,
+              "pass": 196
+            },
+            {
+              "ns": 2286964,
+              "session": 14,
+              "pass": 197
+            },
+            {
+              "ns": 2393299,
+              "session": 14,
+              "pass": 198
+            },
+            {
+              "ns": 2492639,
+              "session": 14,
+              "pass": 199
+            },
+            {
+              "ns": 2451557,
+              "session": 14,
+              "pass": 200
+            },
+            {
+              "ns": 2383390,
+              "session": 14,
+              "pass": 201
+            },
+            {
+              "ns": 2364576,
+              "session": 14,
+              "pass": 202
+            },
+            {
+              "ns": 2334572,
+              "session": 14,
+              "pass": 203
+            },
+            {
+              "ns": 2297044,
+              "session": 14,
+              "pass": 204
+            },
+            {
+              "ns": 2331215,
+              "session": 14,
+              "pass": 205
+            },
+            {
+              "ns": 2288315,
+              "session": 14,
+              "pass": 206
+            },
+            {
+              "ns": 2399433,
+              "session": 14,
+              "pass": 207
+            },
+            {
+              "ns": 2339322,
+              "session": 14,
+              "pass": 208
+            },
+            {
+              "ns": 2333828,
+              "session": 14,
+              "pass": 209
+            },
+            {
+              "ns": 2307088,
+              "session": 14,
+              "pass": 210
+            },
+            {
+              "ns": 2338031,
+              "session": 14,
+              "pass": 211
+            },
+            {
+              "ns": 2336840,
+              "session": 14,
+              "pass": 212
+            },
+            {
+              "ns": 2388357,
+              "session": 14,
+              "pass": 213
+            },
+            {
+              "ns": 2412233,
+              "session": 14,
+              "pass": 214
+            },
+            {
+              "ns": 2449433,
+              "session": 14,
+              "pass": 215
+            },
+            {
+              "ns": 2442961,
+              "session": 14,
+              "pass": 216
+            },
+            {
+              "ns": 2485611,
+              "session": 14,
+              "pass": 217
+            },
+            {
+              "ns": 2381614,
+              "session": 14,
+              "pass": 218
+            },
+            {
+              "ns": 2351188,
+              "session": 14,
+              "pass": 219
+            },
+            {
+              "ns": 2380708,
+              "session": 14,
+              "pass": 220
+            },
+            {
+              "ns": 2393419,
+              "session": 14,
+              "pass": 221
+            },
+            {
+              "ns": 2375511,
+              "session": 14,
+              "pass": 222
+            },
+            {
+              "ns": 2328351,
+              "session": 14,
+              "pass": 223
+            },
+            {
+              "ns": 2292690,
+              "session": 14,
+              "pass": 224
+            },
+            {
+              "ns": 2319336,
+              "session": 14,
+              "pass": 225
+            },
+            {
+              "ns": 2547314,
+              "session": 14,
+              "pass": 226
+            },
+            {
+              "ns": 2389132,
+              "session": 14,
+              "pass": 227
+            },
+            {
+              "ns": 2455567,
+              "session": 14,
+              "pass": 228
+            },
+            {
+              "ns": 2432760,
+              "session": 14,
+              "pass": 229
+            },
+            {
+              "ns": 2394808,
+              "session": 14,
+              "pass": 230
+            },
+            {
+              "ns": 2373771,
+              "session": 14,
+              "pass": 231
+            },
+            {
+              "ns": 2423376,
+              "session": 14,
+              "pass": 232
+            },
+            {
+              "ns": 2410418,
+              "session": 14,
+              "pass": 233
+            },
+            {
+              "ns": 2331458,
+              "session": 14,
+              "pass": 234
+            },
+            {
+              "ns": 2307600,
+              "session": 14,
+              "pass": 235
+            },
+            {
+              "ns": 2406174,
+              "session": 14,
+              "pass": 236
+            },
+            {
+              "ns": 2325967,
+              "session": 14,
+              "pass": 237
+            },
+            {
+              "ns": 2380754,
+              "session": 14,
+              "pass": 238
+            },
+            {
+              "ns": 2297825,
+              "session": 14,
+              "pass": 239
+            },
+            {
+              "ns": 2275546,
+              "session": 14,
+              "pass": 240
+            },
+            {
+              "ns": 2293568,
+              "session": 14,
+              "pass": 241
+            },
+            {
+              "ns": 2295372,
+              "session": 14,
+              "pass": 242
+            },
+            {
+              "ns": 2450781,
+              "session": 14,
+              "pass": 243
+            },
+            {
+              "ns": 2299160,
+              "session": 14,
+              "pass": 244
+            },
+            {
+              "ns": 2234688,
+              "session": 14,
+              "pass": 245
+            },
+            {
+              "ns": 2290274,
+              "session": 14,
+              "pass": 246
+            },
+            {
+              "ns": 2315036,
+              "session": 14,
+              "pass": 247
+            },
+            {
+              "ns": 2293100,
+              "session": 14,
+              "pass": 248
+            },
+            {
+              "ns": 2506932,
+              "session": 14,
+              "pass": 249
+            },
+            {
+              "ns": 2379867,
+              "session": 14,
+              "pass": 250
+            }
+          ]
+        },
+        "short": {
+          "runs": [
+            {
+              "ns": 13450068,
+              "session": 13,
+              "pass": 1
+            },
+            {
+              "ns": 13613792,
+              "session": 13,
+              "pass": 2
+            },
+            {
+              "ns": 13665953,
+              "session": 13,
+              "pass": 3
+            },
+            {
+              "ns": 13372627,
+              "session": 13,
+              "pass": 4
+            },
+            {
+              "ns": 13644088,
+              "session": 13,
+              "pass": 5
+            },
+            {
+              "ns": 13165451,
+              "session": 17,
+              "pass": 1
+            },
+            {
+              "ns": 12973904,
+              "session": 17,
+              "pass": 2
+            },
+            {
+              "ns": 12857269,
+              "session": 17,
+              "pass": 3
+            },
+            {
+              "ns": 13442574,
+              "session": 17,
+              "pass": 4
+            },
+            {
+              "ns": 13244795,
+              "session": 17,
+              "pass": 5
+            },
+            {
+              "ns": 13187393,
+              "session": 17,
+              "pass": 6
+            },
+            {
+              "ns": 13261357,
+              "session": 17,
+              "pass": 7
+            },
+            {
+              "ns": 12944170,
+              "session": 17,
+              "pass": 8
+            },
+            {
+              "ns": 12809122,
+              "session": 17,
+              "pass": 9
+            },
+            {
+              "ns": 13024030,
+              "session": 17,
+              "pass": 10
+            },
+            {
+              "ns": 13222408,
+              "session": 17,
+              "pass": 11
+            },
+            {
+              "ns": 13282716,
+              "session": 17,
+              "pass": 12
+            },
+            {
+              "ns": 13008141,
+              "session": 17,
+              "pass": 13
+            },
+            {
+              "ns": 13229208,
+              "session": 17,
+              "pass": 14
             }
           ]
         }

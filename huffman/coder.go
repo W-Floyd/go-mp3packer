@@ -110,8 +110,8 @@ func Decode(dst *Spectrum, cfg Config, r *bitio.Reader, sampleRate, maxBits int)
 // The bit limit is checked once per pair, never mid-symbol: a codeword that
 // starts inside the granule is read whole, matching how decoders behave. A whole
 // pair — code, escape magnitudes and signs — is at most 47 bits, so it comes out
-// of one peeked word rather than bit by bit, and the first eight bits usually
-// resolve the codeword in a single table lookup.
+// of one peeked word rather than bit by bit, and the first pairBits of it almost
+// always resolve the codeword and both its magnitudes in a single lookup.
 func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int) (int, int, bool) {
 	tree := tables[idx].tree
 	// A pair needs two coefficients, so the spectrum's own end bounds the region
@@ -124,7 +124,7 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 	if len(tree) == 0 {
 		return pos, bp, pos >= end
 	}
-	lut := &decodeTables[idx]
+	lut := &pairTables[idx]
 	linbits := uint(tables[idx].linbits)
 	checkLimit := idx != 0
 	// A magnitude of 15 escapes to linbits, but only for tables that have any.
@@ -139,13 +139,24 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 			return pos, bp, false
 		}
 		w := r.PeekAt(bp)
-		var sym, used int
-		if e := lut[w>>56]; !e.isLong() {
-			sym, used = e.symbol(), e.length()
+		var x, y, used int
+		var nx, ny uint
+		// One load settles the codeword and both magnitudes it stands for. The
+		// prefixes it cannot settle are the ones no codeword of pairBits bits
+		// covers — one symbol in a hundred on real material — and those are walked
+		// from the root rather than resumed part-way, since carrying a resume
+		// position would cost a second table the fast path would have to share its
+		// cache with. Measured: resuming was 3% slower than starting over.
+		if e := lut[w>>(64-pairBits)]; !e.isSlow() {
+			// The codeword length comes out first: everything below waits on the
+			// window having moved past the codeword, and nothing waits on the
+			// magnitudes.
+			used = e.length()
 			w <<= uint(used)
+			x, y = e.x(), e.y()
+			nx, ny = e.nx(), e.ny()
 		} else {
-			node := e.node()
-			used, w = 8, w<<8
+			node, sym := 0, 0
 			for {
 				v := tree[node]
 				if v >= 0 {
@@ -162,6 +173,9 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 					return pos, bp + used, false
 				}
 			}
+			d := &pairDecode[sym]
+			x, y = int(d.x), int(d.y)
+			nx, ny = uint(d.nx), uint(d.ny)
 		}
 
 		// Neither the sign bits nor whether a value is zero can be predicted, so
@@ -169,8 +183,6 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 		// -x, x^0+0 is x — and it is a no-op on zero for either sign bit, which
 		// leaves only the bit advance to depend on the value: a shift by the sign
 		// count, zero or one.
-		d := &pairDecode[sym]
-		x, y := int(d.x), int(d.y)
 		if x == escape {
 			x += int(w >> (64 - linbits))
 			w <<= linbits
@@ -178,8 +190,8 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 		}
 		sx := int(w >> 63)
 		x = (x ^ -sx) + sx
-		w <<= uint(d.nx)
-		used += int(d.nx)
+		w <<= nx
+		used += int(nx)
 
 		if y == escape {
 			y += int(w >> (64 - linbits))
@@ -188,7 +200,7 @@ func decodeRegion(dst *Spectrum, r *bitio.Reader, pos, pairs, idx, limit, bp int
 		}
 		sy := int(w >> 63)
 		y = (y ^ -sy) + sy
-		used += int(d.ny)
+		used += int(ny)
 
 		dst[pos], dst[pos+1] = x, y
 		pos += 2
