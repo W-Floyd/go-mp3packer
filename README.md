@@ -76,19 +76,18 @@ is the full search, the `-z` equivalent:
 | vbr-mono.mp3      | VBR, mono, 44100 Hz                  |  10510 |  10093 |    9989 |  4.96% |
 <!-- /comparison:savings -->
 
-Typical savings on real encodes run from a few tenths of a percent to a few
-percent; files whose bitrate is far above what the audio needs — CBR 320 of quiet
-material being the extreme case — lose much more. Whether any of that is worth
-the rewrite is your call.
+What a file gives up depends on how far its bitrate sits above what the audio
+needs; quiet material at a high CBR is the extreme case. Whether any of that is
+worth the rewrite is your call.
 
-Recompression is not the whole story: `-n` alone removes padding, which is why it
-gets most of the way on the dense files by itself.
+Recompression is not the whole story. `-n` alone removes padding, which is most
+of what there is to remove on a dense file.
 
-The quiet CBR 320 row is worth a second look, where layout only comes out a byte
-*smaller* than the full search. Once every frame has shrunk to the minimum the
+Where layout only comes out level with or smaller than the full search, that is
+the format rather than a defect. Once every frame has shrunk to the minimum the
 format allows, space freed by better compression cannot be given back — it becomes
-padding instead, and the reservoir bookkeeping can spend a byte more of it than it
-saves. Compression and file size are not the same axis; `TestRecompressBeatsLayoutOnly`
+padding instead, and the reservoir bookkeeping can spend more of it than it saves.
+Compression and file size are not the same axis; `TestRecompressBeatsLayoutOnly`
 insists on the payload shrinking rather than the file.
 
 ## Compared with the C++ port
@@ -107,57 +106,70 @@ disagree about what to keep:
   the LSF scalefactor tables to find where each granule's Huffman data starts;
   the C++ port copies those frames through untouched.
 
-On speed we are ahead where it counts. Every test file, both invoked as commands
-with every core available, on an Apple M4 Max:
+On speed, every test file, all three invoked as commands with every core
+available, on an Apple M4 Max. `reference` is `mp3packercpp` as released; `fork`
+is a branch of it carrying optimisation work that upstream does not have, which is
+the more demanding comparison of the two:
 
 <!-- comparison:comparison-files -->
-| file              |    size |    ours | reference |      |
-|:------------------|--------:|--------:|----------:|-----:|
-| bench-vbr.mp3     |  180 kB | 4.89 ms |   22.6 ms | 4.6× |
-| cbr-crc.mp3       |   20 kB | 3.30 ms |   6.60 ms | 2.0× |
-| cbr320-quiet.mp3  |  322 kB | 4.38 ms |   7.95 ms | 1.8× |
-| cbr320-stereo.mp3 |   50 kB | 3.47 ms |   3.39 ms | 1.0× |
-| lsf-22050.mp3     |   15 kB | 3.39 ms |   2.42 ms | 0.7× |
-| vbr-joint.mp3     |   28 kB | 3.38 ms |   5.75 ms | 1.7× |
-| vbr-mono.mp3      |   10 kB | 3.32 ms |   4.62 ms | 1.4× |
-| bards-tale.mp3    | 3810 kB | 23.3 ms |    197 ms | 8.5× |
+| file              |    size |    ours |    fork | reference | vs fork | vs ref |
+|:------------------|--------:|--------:|--------:|----------:|--------:|-------:|
+| bench-vbr.mp3     |  180 kB | 4.52 ms | 3.98 ms |   22.7 ms |    0.9× |   5.0× |
+| cbr-crc.mp3       |   20 kB | 3.75 ms | 2.89 ms |   7.14 ms |    0.8× |   1.9× |
+| cbr320-quiet.mp3  |  322 kB | 4.17 ms | 3.76 ms |   8.41 ms |    0.9× |   2.0× |
+| cbr320-stereo.mp3 |   50 kB | 3.52 ms | 2.97 ms |   3.51 ms |    0.8× |   1.0× |
+| lsf-22050.mp3     |   15 kB | 3.50 ms | 2.36 ms |   2.64 ms |    0.7× |   0.8× |
+| vbr-joint.mp3     |   28 kB | 3.67 ms | 3.20 ms |   6.73 ms |    0.9× |   1.8× |
+| vbr-mono.mp3      |   10 kB | 3.35 ms | 2.66 ms |   4.51 ms |    0.8× |   1.3× |
+| bards-tale.mp3    | 3810 kB | 23.2 ms | 22.4 ms |    206 ms |    1.0× |   8.9× |
 <!-- /comparison:comparison-files -->
 
-Two things in there are worth reading rather than skipping. The ratio collapses as
-the files get smaller, and on the two smallest it goes the other way: below about
-50 kB both sides are mostly paying to start a process, and ours costs 2.9 ms of
-that. On `lsf-22050.mp3` the reference is quicker for a different reason — it
-declines to recompress MPEG-2 at all, so it is not doing the same job.
+Three things in there are worth reading rather than skipping. The lead over the
+released reference collapses as the files get smaller, and on the smallest it goes
+the other way: on a small enough file every side is mostly paying to start a
+process, and starting ours costs the larger share of that. `lsf-22050.mp3` is
+quicker for both of them for a different reason — the C++ port declines to
+recompress MPEG-2 at all, so it is not doing the same job.
+
+The fork is the one to watch. It is within noise of us on long material and ahead
+on the short files, for the startup reason above rather than anything about the
+repack. Against a C++ implementation carrying comparable optimisation work, level
+is the honest description; the order-of-magnitude figures belong to the comparison
+with upstream, not to the language.
 
 Across worker counts, on the longest file to hand:
 
 <!-- comparison:comparison-threads -->
-| threads |    ours | reference |       |
-|--------:|--------:|----------:|------:|
-|       1 |  186 ms |   2211 ms | 11.9× |
-|       2 |  101 ms |   1150 ms | 11.4× |
-|       4 | 57.2 ms |    591 ms | 10.3× |
-|     all | 23.3 ms |    197 ms |  8.5× |
+| threads |    ours |    fork | reference | vs fork | vs ref |
+|--------:|--------:|--------:|----------:|--------:|-------:|
+|       1 |  173 ms |  177 ms |   2251 ms |    1.0× |  13.0× |
+|       2 | 92.1 ms | 96.1 ms |   1153 ms |    1.0× |  12.5× |
+|       4 | 51.7 ms | 54.3 ms |    597 ms |    1.1× |  11.6× |
+|     all | 23.2 ms | 22.4 ms |    206 ms |    1.0× |   8.9× |
 <!-- /comparison:comparison-threads -->
 
-Our lead is largest on one worker and narrows as cores are added, because the
-reference scales better than we do: 11.2× from one thread to sixteen against our
-8.0×. A fifth of our wall clock is parsing and laying frames back out, and no
-number of workers can share it — see [PERFORMANCE.md](PERFORMANCE.md).
+Our lead over the reference is largest on one worker and narrows as cores are
+added, because it scales better than we do. A fixed part of our wall clock is
+parsing and laying frames back out, and no number of workers can share it — see
+[PERFORMANCE.md](PERFORMANCE.md). The fork tracks us closely at every worker
+count, which is what two implementations doing the same work in the same shape
+look like.
 
 `TestComparison` produces both tables and asserts what they claim, which is
-narrowly that we are faster on the longest file at every worker count. It times
-each side the same way, as a subprocess over a file, so the exec and the disk are
-in every figure:
+narrowly that we are faster than the reference on the longest file at every worker
+count. Nothing is asserted about the fork: which way that one goes is a fact to
+report, not a property of this repository to defend. It times every side the same
+way, as a subprocess over a file, so the exec and the disk are in every figure:
 
 ```sh
 export MP3PACKER_REFERENCE=/path/to/mp3packercpp
+export MP3PACKER_REFERENCE_FORK=/path/to/a/fork   # optional third column
 export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3   # optional
-go test -run TestComparison -update-comparison .
+go test -run TestComparison -update-readme .
 ```
 
 `TestReferenceCompression` is the other half: it repacks each file with both and
-fails if our coded audio is larger. On five of the seven the output is the same
+fails if our coded audio is larger. On most of the corpus the output is the same
 size to the byte.
 
 For measuring changes to the code rather than comparing implementations, see
@@ -165,15 +177,13 @@ For measuring changes to the code rather than comparing implementations, see
 
 ## Performance
 
-Repacking two and a half minutes of music on an Apple M4 Max: 197 ms on one
-worker, 17.9 ms across sixteen. From the first working version that is a little
-over tenfold either way, by quite different routes.
-
-The one thing worth knowing before touching any of it: a fifth of the wall clock
-is parsing and laying the frames back out, and no number of workers can share
-that. So a change is meaningless without a worker count attached — folding the
-frame CRC through a table is worth 2% on one worker and 18% across sixteen, and
-the AVX2 row batching is worth 4.6% of one worker and nothing at all of sixteen.
+The one thing worth knowing before touching any of it: a fixed part of the wall
+clock is parsing and laying the frames back out, and no number of workers can
+share that. So a change is meaningless without a worker count attached. Folding
+the frame CRC through a table lands almost entirely in that part and is worth many
+times more across all cores than on one; the AVX2 row batching goes the other way,
+4.6% of one worker and nothing at all of sixteen — a step no table here can
+resolve, measured with `benchsteps ab`.
 
 [PERFORMANCE.md](PERFORMANCE.md) has the measured history commit by commit, the
 cross-architecture table, where the cores go, the assembly, and a list of things

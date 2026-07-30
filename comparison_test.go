@@ -73,17 +73,22 @@ var comparisonThreads = []int{1, 2, 4, 0}
 // also rewrites the tables there, so those numbers are generated from a
 // measurement rather than typed in from one.
 //
-// The claim is deliberately narrow: faster on the longest file available, at every
-// worker count. It is not "faster on every file", which is false and which this
-// test is how we found out. Below about 50 kB both sides are mostly paying to
-// start a process, and ours costs 2.9 ms of that, so the corpus's small files come
-// out level or worse — and on the MPEG-2 file the reference is quicker because it
-// declines to recompress MPEG-2 at all, which is not the same job.
+// The claim is deliberately narrow: faster than the reference on the longest file
+// available, at every worker count. It is not "faster on every file", which is
+// false and which this test is how we found out. On a small enough file both sides
+// are mostly paying to start a process, so the corpus's small files come out level
+// or worse — and on the MPEG-2 file the reference is quicker because it declines to
+// recompress MPEG-2 at all, which is not the same job.
+//
+// $MP3PACKER_REFERENCE_FORK adds a third column. Nothing is asserted about it: it
+// is a fork carrying its own optimisation work, so which way it goes is a fact to
+// report and not a property of this repository to defend.
 //
 // Both sides are timed the same way, as a subprocess over a file, so the exec and
 // the disk are in every figure.
 func TestComparison(t *testing.T) {
 	ref := referenceBinary(t) // skips unless MP3PACKER_REFERENCE is set
+	fork := forkBinary(t)     // optional third column; "" leaves the tables two-way
 	ours := mp3packerBinary(t)
 	dir := t.TempDir()
 
@@ -93,6 +98,7 @@ func TestComparison(t *testing.T) {
 		bytes   int
 		ourMs   map[int]float64
 		theirMs map[int]float64
+		forkMs  map[int]float64
 	}
 	rows := make([]row, 0, len(files))
 	for _, path := range files {
@@ -105,11 +111,15 @@ func TestComparison(t *testing.T) {
 			bytes:   int(info.Size()),
 			ourMs:   map[int]float64{},
 			theirMs: map[int]float64{},
+			forkMs:  map[int]float64{},
 		}
 		out := filepath.Join(dir, r.file)
 		for _, n := range comparisonThreads {
 			r.ourMs[n] = timeCommand(t, ours, ourArgs(n, path, out)...)
 			r.theirMs[n] = timeCommand(t, ref, theirArgs(n, path, out)...)
+			if fork != "" {
+				r.forkMs[n] = timeCommand(t, fork, theirArgs(n, path, out)...)
+			}
 		}
 		rows = append(rows, r)
 	}
@@ -129,23 +139,42 @@ func TestComparison(t *testing.T) {
 				r.file, r.bytes/1000, r.ourMs[0], r.theirMs[0])
 		}
 	}
+	if fork != "" {
+		for _, n := range comparisonThreads {
+			t.Logf("%s at %d threads: %.2f ms against the fork's %.2f",
+				longest.file, n, longest.ourMs[n], longest.forkMs[n])
+		}
+	}
 
 	if !*updateReadme {
 		t.Log("pass -update-readme to rewrite the tables in README.md")
 		return
 	}
 
+	filesHead := []string{"file", "size", "ours", "reference", ""}
+	filesAlign := []tw.Align{alignL, alignR, alignR, alignR, alignR}
+	if fork != "" {
+		filesHead = []string{"file", "size", "ours", "fork", "reference", "vs fork", "vs ref"}
+		filesAlign = append(filesAlign, alignR, alignR)
+	}
 	byFile := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		byFile = append(byFile, []string{
+		cells := []string{
 			r.file, fmt.Sprintf("%d kB", r.bytes/1000),
-			threeFigures(r.ourMs[0]) + " ms", threeFigures(r.theirMs[0]) + " ms",
-			fmt.Sprintf("%.1f×", r.theirMs[0]/r.ourMs[0]),
-		})
+			threeFigures(r.ourMs[0]) + " ms",
+		}
+		if fork != "" {
+			cells = append(cells, threeFigures(r.forkMs[0])+" ms",
+				threeFigures(r.theirMs[0])+" ms",
+				fmt.Sprintf("%.1f×", r.forkMs[0]/r.ourMs[0]),
+				fmt.Sprintf("%.1f×", r.theirMs[0]/r.ourMs[0]))
+		} else {
+			cells = append(cells, threeFigures(r.theirMs[0])+" ms",
+				fmt.Sprintf("%.1f×", r.theirMs[0]/r.ourMs[0]))
+		}
+		byFile = append(byFile, cells)
 	}
-	filesTable := markdownTable(
-		[]string{"file", "size", "ours", "reference", ""},
-		[]tw.Align{alignL, alignR, alignR, alignR, alignR}, byFile)
+	filesTable := markdownTable(filesHead, filesAlign, byFile)
 
 	// Thread scaling is shown on the longest file available: on a short one the
 	// fixed costs swamp what the workers are doing.
@@ -156,14 +185,25 @@ func TestComparison(t *testing.T) {
 		if n == 0 {
 			label = "all"
 		}
-		byThreads = append(byThreads, []string{
-			label, threeFigures(last.ourMs[n]) + " ms", threeFigures(last.theirMs[n]) + " ms",
-			fmt.Sprintf("%.1f×", last.theirMs[n]/last.ourMs[n]),
-		})
+		cells := []string{label, threeFigures(last.ourMs[n]) + " ms"}
+		if fork != "" {
+			cells = append(cells, threeFigures(last.forkMs[n])+" ms",
+				threeFigures(last.theirMs[n])+" ms",
+				fmt.Sprintf("%.1f×", last.forkMs[n]/last.ourMs[n]),
+				fmt.Sprintf("%.1f×", last.theirMs[n]/last.ourMs[n]))
+		} else {
+			cells = append(cells, threeFigures(last.theirMs[n])+" ms",
+				fmt.Sprintf("%.1f×", last.theirMs[n]/last.ourMs[n]))
+		}
+		byThreads = append(byThreads, cells)
 	}
-	threadsTable := markdownTable(
-		[]string{"threads", "ours", "reference", ""},
-		[]tw.Align{alignR, alignR, alignR, alignR}, byThreads)
+	threadsHead := []string{"threads", "ours", "reference", ""}
+	threadsAlign := []tw.Align{alignR, alignR, alignR, alignR}
+	if fork != "" {
+		threadsHead = []string{"threads", "ours", "fork", "reference", "vs fork", "vs ref"}
+		threadsAlign = append(threadsAlign, alignR, alignR)
+	}
+	threadsTable := markdownTable(threadsHead, threadsAlign, byThreads)
 
 	body, err := os.ReadFile("README.md")
 	if err != nil {

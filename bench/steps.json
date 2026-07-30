@@ -246,6 +246,33 @@
         "steps-long",
         "steps-serial"
       ]
+    },
+    {
+      "commit": "8050540",
+      "label": "last non-zero coefficient carried into the encoder",
+      "tables": [
+        "steps-short",
+        "steps-long",
+        "steps-serial"
+      ]
+    },
+    {
+      "commit": "cb9bab4",
+      "label": "cost tables scaled once, not per prefix row",
+      "tables": [
+        "steps-short",
+        "steps-long",
+        "steps-serial"
+      ]
+    },
+    {
+      "commit": "acb37e3",
+      "label": "big-value pair resolved in one ten-bit probe",
+      "tables": [
+        "steps-short",
+        "steps-long",
+        "steps-serial"
+      ]
     }
   ]
 }
