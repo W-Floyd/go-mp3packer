@@ -1,6 +1,7 @@
 package huffman
 
 import (
+	"bytes"
 	"math/rand"
 	"testing"
 
@@ -130,6 +131,61 @@ func TestOptimizeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCodingEncodeMatchesEncode holds the two encode paths to the same bytes.
+// Coding.Encode differs from Encode only in taking the end of the coefficients
+// from the search instead of walking to find it, so a Coding that disagreed with
+// lastNonZero would change the count1 region's length — output bytes, not just
+// speed. The whole point of the field being unexported is that this is the only
+// place it can come from, so this is where it is checked.
+func TestCodingEncodeMatchesEncode(t *testing.T) {
+	rng := rand.New(rand.NewSource(13))
+	rates := []int{44100, 48000, 32000, 24000, 22050, 8000}
+
+	spectra := []Spectrum{{}} // silence: nothing to code at all
+	var top Spectrum
+	top[NumCoefficients-1] = 1 // and a granule that codes to the very end
+	spectra = append(spectra, top)
+	for _, peak := range []int{1, 2, 7, 15, 60, 4000} {
+		for iter := 0; iter < 10; iter++ {
+			spectra = append(spectra, randomSpectrum(rng, peak))
+		}
+	}
+
+	for _, rate := range rates {
+		for i := range spectra {
+			s := spectra[i]
+			for geom := 0; geom < 4; geom++ {
+				orig := Config{Count1Table: count1Table32}
+				switch geom {
+				case 1:
+					orig.WindowSwitching, orig.BlockType = true, 2
+				case 2:
+					orig.WindowSwitching, orig.BlockType, orig.MixedBlock = true, 2, true
+				case 3:
+					orig.WindowSwitching, orig.BlockType = true, 1
+				}
+				c := Search(&s, orig, rate)
+				if c.last != lastNonZero(&s) {
+					t.Fatalf("%dHz geometry %d: search says last is %d, lastNonZero says %d",
+						rate, geom, c.last, lastNonZero(&s))
+				}
+				if c.Bits < 0 {
+					continue
+				}
+
+				wc := bitio.NewWriter()
+				c.Encode(&s, wc, rate)
+				we := bitio.NewWriter()
+				Encode(&s, c.Config, we, rate)
+				if wc.Tell() != we.Tell() || !bytes.Equal(wc.Bytes(), we.Bytes()) {
+					t.Fatalf("%dHz geometry %d: Coding.Encode wrote %d bits, Encode wrote %d",
+						rate, geom, wc.Tell(), we.Tell())
+				}
+			}
+		}
+	}
+}
+
 // TestOptimizeNeverWorseThanEncoderChoice compares the search against the
 // coding a straightforward encoder would pick for the same spectrum.
 func TestOptimizeNeverWorseThanEncoderChoice(t *testing.T) {
@@ -248,6 +304,29 @@ func BenchmarkEncodeGranule(b *testing.B) {
 	i := 0
 	for b.Loop() {
 		Encode(&corpus[i], coded[i].cfg, bitio.NewWriterBuf(buf), 44100)
+		if i++; i == len(corpus) {
+			i = 0
+		}
+	}
+}
+
+// BenchmarkEncodeGranuleCoding is the path a repack takes: the granule has just
+// been searched, so Coding carries the end of its coefficients and the encoder
+// does not walk the trailing zeros to rediscover it. The difference from
+// BenchmarkEncodeGranule above is exactly that walk.
+func BenchmarkEncodeGranuleCoding(b *testing.B) {
+	corpus := benchCorpus()
+	codings := make([]Coding, len(corpus))
+	for i := range corpus {
+		codings[i] = Search(&corpus[i], Config{Count1Table: count1Table32}, 44100)
+		if codings[i].Bits < 0 {
+			b.Fatalf("granule %d has no legal coding", i)
+		}
+	}
+	buf := make([]byte, NumCoefficients*8+bitio.Slack)
+	i := 0
+	for b.Loop() {
+		codings[i].Encode(&corpus[i], bitio.NewWriterBuf(buf), 44100)
 		if i++; i == len(corpus) {
 			i = 0
 		}

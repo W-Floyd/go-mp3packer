@@ -137,8 +137,34 @@ func (sc *scratch) fillPrefixes(n int) {
 	}
 }
 
+// Coding is the outcome of a search: the configuration to write a granule with,
+// what it costs, and what the search learned along the way that the encoder
+// would otherwise have to work out again.
+type Coding struct {
+	// Config codes the spectrum in Bits bits. Bits is -1 if no legal coding was
+	// found, in which case Config is the one the search started from.
+	Config Config
+	Bits   int
+
+	// last is one past the highest non-zero coefficient, which is where the
+	// count1 region stops. The search needs it to bound big_values, and Encode
+	// needs it for the same spectrum a moment later; carrying it is what stops
+	// the trailing zero run being walked twice. It stays unexported so that it
+	// can only have come from a search of the spectrum it is used with.
+	last int
+}
+
 // Optimize searches for the cheapest legal Huffman coding of s and returns the
 // configuration that achieves it together with its size in bits.
+//
+// It is Search without the part only Encode has any use for; a caller that goes
+// on to encode should prefer Search and [Coding.Encode].
+func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
+	c := Search(s, orig, sampleRate)
+	return c.Config, c.Bits
+}
+
+// Search finds the cheapest legal Huffman coding of s.
 //
 // The search is exhaustive over everything the side info can express: the
 // big-values split point, both region boundaries, the code table for each
@@ -148,7 +174,7 @@ func (sc *scratch) fillPrefixes(n int) {
 //
 // orig supplies the block geometry, which is not ours to change: the region
 // boundaries of a window-switched granule are fixed by the standard.
-func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
+func Search(s *Spectrum, orig Config, sampleRate int) Coding {
 	sc := scratchPool.Get().(*scratch)
 	defer scratchPool.Put(sc)
 
@@ -307,7 +333,7 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 				consider(total, 0, 0, headTable, t1, 0)
 			}
 		}
-		return winner(orig, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
+		return winner(orig, last, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
 	}
 
 	// nTail is how many band boundaries lie strictly below big_values. Because
@@ -415,15 +441,15 @@ func Optimize(s *Spectrum, orig Config, sampleRate int) (Config, int) {
 			}
 		}
 	}
-	return winner(orig, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
+	return winner(orig, last, bestBits, bestBV, bestC1, bestTables, bestR0, bestR1)
 }
 
 // winner assembles the configuration the search settled on. Both searches end
 // this way, and neither runs it more than once, so it is a function rather than
 // repeated at each exit.
-func winner(orig Config, bits, bv, c1Table int, tables [3]int, r0, r1 int) (Config, int) {
+func winner(orig Config, last, bits, bv, c1Table int, tables [3]int, r0, r1 int) Coding {
 	if bits < 0 {
-		return orig, -1
+		return Coding{Config: orig, Bits: -1, last: last}
 	}
 	best := orig
 	best.BigValues = bv
@@ -432,7 +458,7 @@ func winner(orig Config, bits, bv, c1Table int, tables [3]int, r0, r1 int) (Conf
 	if !orig.WindowSwitching {
 		best.Region0Count, best.Region1Count = r0, r1
 	}
-	return best, bits
+	return Coding{Config: best, Bits: bits, last: last}
 }
 
 // buildCount1Costs fills in the cost of coding the spectrum tail as count1

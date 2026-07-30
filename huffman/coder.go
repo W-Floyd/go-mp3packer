@@ -225,6 +225,22 @@ func decodeCount1(dst *Spectrum, r *bitio.Reader, pos, table, limit, bp int) (in
 // Encode writes a spectrum using cfg. cfg must be able to represent every
 // coefficient, which is guaranteed for the Config returned by Optimize.
 func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
+	encode(s, cfg, w, sampleRate, lastNonZero(s))
+}
+
+// Encode writes s with the coding the search chose for it. It is [Encode] for a
+// caller that has just searched the same spectrum, and cheaper by the walk of
+// the trailing zero run that the search already did.
+//
+// s must be the spectrum c was searched from. A Coding whose Bits is negative
+// has no coding to write and must not be used.
+func (c Coding) Encode(s *Spectrum, w *bitio.Writer, sampleRate int) {
+	encode(s, c.Config, w, sampleRate, c.last)
+}
+
+// encode writes the spectrum. last is one past the highest non-zero coefficient,
+// which is where the count1 region stops.
+func encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate, last int) {
 	pos := 0
 	// The accumulator is carried in these two locals for the whole of the
 	// granule and handed back at the end, so that appending a field is a shift
@@ -281,7 +297,6 @@ func Encode(s *Spectrum, cfg Config, w *bitio.Writer, sampleRate int) {
 		}
 	}
 
-	last := lastNonZero(s)
 	tab := &encodeTables[cfg.Count1Table]
 	for pos <= NumCoefficients-4 && pos < last {
 		// The quadruple's symbol and its sign bits are built in the same pass, both

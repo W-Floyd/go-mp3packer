@@ -361,13 +361,14 @@ func recompressFrame(fr *mp3.Frame, pool []byte, start int, buf []byte, opt Opti
 			if !huffman.Decode(&spectrum, cfg, r, h.SampleRate, origBits-sfBits) {
 				return verbatim(true)
 			}
-			best, bits := huffman.Optimize(&spectrum, cfg, h.SampleRate)
-			if bits < 0 {
+			coding := huffman.Search(&spectrum, cfg, h.SampleRate)
+			if coding.Bits < 0 {
 				return verbatim(true)
 			}
+			best := coding.Config
 
 			huffStart := w.Tell()
-			huffman.Encode(&spectrum, best, w, h.SampleRate)
+			coding.Encode(&spectrum, w, h.SampleRate)
 
 			// Trust nothing: decode what was just written and require it to
 			// reproduce the spectrum exactly before accepting it.

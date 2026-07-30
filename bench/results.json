@@ -16,7 +16,7 @@
   },
   "tolerance": 0.005,
   "minRounds": 5,
-  "session": 3,
+  "session": 6,
   "inputs": [
     {
       "id": "short",
@@ -10225,6 +10225,355 @@
               "ns": 13736103,
               "session": 3,
               "pass": 7
+            }
+          ]
+        }
+      }
+    },
+    {
+      "commit": "9383260",
+      "label": "docs: generate What it saves, and lay every table out with tablewriter",
+      "tables": null,
+      "cells": {
+        "long1": {
+          "runs": [
+            {
+              "ns": 187662458,
+              "session": 5,
+              "pass": 1
+            },
+            {
+              "ns": 186678958,
+              "session": 5,
+              "pass": 2
+            },
+            {
+              "ns": 190912520,
+              "session": 5,
+              "pass": 3
+            },
+            {
+              "ns": 183794562,
+              "session": 5,
+              "pass": 4
+            },
+            {
+              "ns": 188360646,
+              "session": 5,
+              "pass": 5
+            },
+            {
+              "ns": 187431812,
+              "session": 5,
+              "pass": 6
+            }
+          ]
+        },
+        "longall": {
+          "runs": [
+            {
+              "ns": 18195353,
+              "session": 6,
+              "pass": 1
+            },
+            {
+              "ns": 19530525,
+              "session": 6,
+              "pass": 2
+            },
+            {
+              "ns": 18726669,
+              "session": 6,
+              "pass": 3
+            },
+            {
+              "ns": 19035472,
+              "session": 6,
+              "pass": 4
+            },
+            {
+              "ns": 18243011,
+              "session": 6,
+              "pass": 5
+            },
+            {
+              "ns": 18235006,
+              "session": 6,
+              "pass": 6
+            },
+            {
+              "ns": 18736722,
+              "session": 6,
+              "pass": 7
+            },
+            {
+              "ns": 18521158,
+              "session": 6,
+              "pass": 8
+            },
+            {
+              "ns": 18864092,
+              "session": 6,
+              "pass": 9
+            },
+            {
+              "ns": 18568875,
+              "session": 6,
+              "pass": 10
+            },
+            {
+              "ns": 18233869,
+              "session": 6,
+              "pass": 11
+            },
+            {
+              "ns": 18551969,
+              "session": 6,
+              "pass": 12
+            },
+            {
+              "ns": 20029286,
+              "session": 6,
+              "pass": 13
+            },
+            {
+              "ns": 18389006,
+              "session": 6,
+              "pass": 14
+            },
+            {
+              "ns": 18297683,
+              "session": 6,
+              "pass": 15
+            },
+            {
+              "ns": 17901806,
+              "session": 6,
+              "pass": 16
+            },
+            {
+              "ns": 18342856,
+              "session": 6,
+              "pass": 17
+            },
+            {
+              "ns": 18132897,
+              "session": 6,
+              "pass": 18
+            },
+            {
+              "ns": 18225717,
+              "session": 6,
+              "pass": 19
+            },
+            {
+              "ns": 19650369,
+              "session": 6,
+              "pass": 20
+            },
+            {
+              "ns": 19012489,
+              "session": 6,
+              "pass": 21
+            },
+            {
+              "ns": 18369831,
+              "session": 6,
+              "pass": 22
+            },
+            {
+              "ns": 18027114,
+              "session": 6,
+              "pass": 23
+            },
+            {
+              "ns": 18068950,
+              "session": 6,
+              "pass": 24
+            },
+            {
+              "ns": 18102886,
+              "session": 6,
+              "pass": 25
+            },
+            {
+              "ns": 18166586,
+              "session": 6,
+              "pass": 26
+            },
+            {
+              "ns": 18238272,
+              "session": 6,
+              "pass": 27
+            },
+            {
+              "ns": 18258253,
+              "session": 6,
+              "pass": 28
+            },
+            {
+              "ns": 18594981,
+              "session": 6,
+              "pass": 29
+            },
+            {
+              "ns": 19032414,
+              "session": 6,
+              "pass": 30
+            },
+            {
+              "ns": 20059544,
+              "session": 6,
+              "pass": 31
+            },
+            {
+              "ns": 18065886,
+              "session": 6,
+              "pass": 32
+            },
+            {
+              "ns": 17952858,
+              "session": 6,
+              "pass": 33
+            },
+            {
+              "ns": 18378189,
+              "session": 6,
+              "pass": 34
+            },
+            {
+              "ns": 18780958,
+              "session": 6,
+              "pass": 35
+            },
+            {
+              "ns": 18101458,
+              "session": 6,
+              "pass": 36
+            },
+            {
+              "ns": 18573964,
+              "session": 6,
+              "pass": 37
+            },
+            {
+              "ns": 18377397,
+              "session": 6,
+              "pass": 38
+            },
+            {
+              "ns": 18111572,
+              "session": 6,
+              "pass": 39
+            },
+            {
+              "ns": 18454225,
+              "session": 6,
+              "pass": 40
+            },
+            {
+              "ns": 19480528,
+              "session": 6,
+              "pass": 41
+            },
+            {
+              "ns": 18357558,
+              "session": 6,
+              "pass": 42
+            },
+            {
+              "ns": 18681594,
+              "session": 6,
+              "pass": 43
+            },
+            {
+              "ns": 19334806,
+              "session": 6,
+              "pass": 44
+            },
+            {
+              "ns": 18764044,
+              "session": 6,
+              "pass": 45
+            },
+            {
+              "ns": 18856689,
+              "session": 6,
+              "pass": 46
+            },
+            {
+              "ns": 18615183,
+              "session": 6,
+              "pass": 47
+            },
+            {
+              "ns": 18423925,
+              "session": 6,
+              "pass": 48
+            },
+            {
+              "ns": 18194003,
+              "session": 6,
+              "pass": 49
+            },
+            {
+              "ns": 18339808,
+              "session": 6,
+              "pass": 50
+            },
+            {
+              "ns": 18296453,
+              "session": 6,
+              "pass": 51
+            },
+            {
+              "ns": 18366119,
+              "session": 6,
+              "pass": 52
+            },
+            {
+              "ns": 18262214,
+              "session": 6,
+              "pass": 53
+            },
+            {
+              "ns": 18087306,
+              "session": 6,
+              "pass": 54
+            },
+            {
+              "ns": 18696708,
+              "session": 6,
+              "pass": 55
+            }
+          ]
+        },
+        "short": {
+          "runs": [
+            {
+              "ns": 13083244,
+              "session": 4,
+              "pass": 1
+            },
+            {
+              "ns": 12862085,
+              "session": 4,
+              "pass": 2
+            },
+            {
+              "ns": 12828285,
+              "session": 4,
+              "pass": 3
+            },
+            {
+              "ns": 12930549,
+              "session": 4,
+              "pass": 4
+            },
+            {
+              "ns": 12833560,
+              "session": 4,
+              "pass": 5
             }
           ]
         }
