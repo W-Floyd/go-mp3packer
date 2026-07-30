@@ -145,13 +145,36 @@ func b2u(v bool) uint8 {
 }
 
 func init() {
+	// All three derived tables are a function of the code grid alone — linbits is
+	// applied by the coder, after the lookup — so the sixteen table indices that
+	// repeat an earlier index's grid can copy its results rather than walk the same
+	// tree again. Half of the 34 do, and building the probe is the most expensive
+	// thing this package does before main.
+	//
+	// The copies are kept rather than shared: each index still owns a full table,
+	// so nothing on the decode path gains an indirection, and the memory it touches
+	// is laid out exactly as it was. Only the startup work is saved.
+	//
+	// maxQuant is not eligible. The largest coefficient a table can represent is
+	// what linbits extends, so it differs between indices that share a grid and is
+	// computed for each.
+	first := make(map[*grid]int, len(tables))
 	for i := range tables {
-		encodeTables[i] = buildEncodeTable(i)
-		maxQuant[i] = tableMaxQuant(i, &encodeTables[i])
-		buildDecodeTable(i, &decodeTables[i])
-		if i < len(pairTables) {
-			buildPairTable(i, &pairTables[i])
+		if j, ok := first[tables[i].g]; ok {
+			encodeTables[i] = encodeTables[j]
+			decodeTables[i] = decodeTables[j]
+			if i < len(pairTables) {
+				pairTables[i] = pairTables[j]
+			}
+		} else {
+			first[tables[i].g] = i
+			encodeTables[i] = buildEncodeTable(i)
+			buildDecodeTable(i, &decodeTables[i])
+			if i < len(pairTables) {
+				buildPairTable(i, &pairTables[i])
+			}
 		}
+		maxQuant[i] = tableMaxQuant(i, &encodeTables[i])
 	}
 }
 

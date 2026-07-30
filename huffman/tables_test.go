@@ -101,3 +101,28 @@ func TestTreesDecodeTheGrids(t *testing.T) {
 		}
 	}
 }
+
+// TestSharedTablesEqualTheirOwnBuild guards the startup shortcut in codes.go: the
+// sixteen table indices that copy an earlier index's encode map, decode table and
+// probe must get exactly what building their own would have produced. Sharing is
+// decided on the grid pointer, so a table list that ever pointed two genuinely
+// different tables at one grid would be caught here rather than by wrong output.
+func TestSharedTablesEqualTheirOwnBuild(t *testing.T) {
+	for i := range tables {
+		if got, want := encodeTables[i], buildEncodeTable(i); got != want {
+			t.Errorf("encodeTables[%d] is not what building table %d gives", i, i)
+		}
+		var dec [256]decodeEntry
+		buildDecodeTable(i, &dec)
+		if decodeTables[i] != dec {
+			t.Errorf("decodeTables[%d] is not what building table %d gives", i, i)
+		}
+		if i < len(pairTables) {
+			var pair [pairSize]pairEntry
+			buildPairTable(i, &pair)
+			if pairTables[i] != pair {
+				t.Errorf("pairTables[%d] is not what building table %d gives", i, i)
+			}
+		}
+	}
+}
