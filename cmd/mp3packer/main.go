@@ -24,6 +24,13 @@ tightest frame layout that coding allows. The decoded audio is unchanged.
 If out.mp3 is omitted, the input is replaced in place. Tags and any leading
 Xing/Info header are preserved.
 
+With -cbr the output is constant-bitrate instead of as small as possible, for
+players that cannot follow a varying bitrate: the lowest bitrate the audio fits
+in is chosen from the repack itself, in the same pass. -b N asks for a particular
+bitrate instead, and raises the floor if it is higher than the one -cbr would
+pick. --ib just prints the number and writes nothing; it depends on -n and
+-no-crc, since both change how much has to fit.
+
 options:
 `)
 	flag.PrintDefaults()
@@ -33,6 +40,9 @@ func main() {
 	var (
 		noRecompress = flag.Bool("n", false, "skip the Huffman search; only repack the frame layout")
 		stripCRC     = flag.Bool("no-crc", false, "drop the optional frame CRC, freeing 2 bytes per frame")
+		minBitrate   = flag.Int("b", 0, "minimum bitrate in kbps; an exact one gives constant-bitrate output")
+		cbr          = flag.Bool("cbr", false, "constant-bitrate output at the lowest bitrate that fits")
+		infoBitrate  = flag.Bool("ib", false, "print the lowest constant bitrate this file fits in, and exit")
 		workers      = flag.Int("j", 0, "recompression workers (0 = one per CPU)")
 		verbose      = flag.Bool("v", false, "log per-frame details")
 		quiet        = flag.Bool("q", false, "print nothing on success")
@@ -53,7 +63,11 @@ func main() {
 	}
 	in := args[0]
 	out := in
-	if len(args) == 2 {
+	if *infoBitrate {
+		// Nothing is written, so an output argument is accepted and ignored, as
+		// mp3packer's own --ib does.
+		out = ""
+	} else if len(args) == 2 {
 		out = args[1]
 		if info, err := os.Stat(out); err == nil {
 			if info.IsDir() {
@@ -65,14 +79,29 @@ func main() {
 	}
 
 	opt := mp3packer.Options{
-		Recompress: !*noRecompress,
-		StripCRC:   *stripCRC,
-		Workers:    *workers,
+		Recompress:      !*noRecompress,
+		StripCRC:        *stripCRC,
+		Workers:         *workers,
+		MinBitrate:      *minBitrate,
+		ConstantBitrate: *cbr,
 	}
 	if *verbose {
 		opt.Log = func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		}
+	}
+
+	if *infoBitrate {
+		data, err := os.ReadFile(in)
+		if err != nil {
+			fatal(err)
+		}
+		bitrate, err := mp3packer.SmallestCBRBitrate(data, opt)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(bitrate)
+		return
 	}
 
 	stats, err := mp3packer.ProcessFile(in, out, opt)
@@ -86,6 +115,9 @@ func main() {
 		}
 		fmt.Printf("%s: %d -> %d bytes (%.2f%% smaller), %d frames, %d recompressed",
 			in, stats.InputSize, stats.OutputSize, pct, stats.Frames, stats.Recompressed)
+		if stats.Bitrate > 0 {
+			fmt.Printf(", %d kbps floor", stats.Bitrate)
+		}
 		if stats.Abandoned > 0 {
 			fmt.Printf(", %d left as-is", stats.Abandoned)
 		}

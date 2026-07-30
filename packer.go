@@ -3,8 +3,10 @@
 // It re-codes each frame's Huffman data with the cheapest tables the format
 // allows and then re-lays the result out across frames, minimising both the
 // coded size of the audio and the padding needed to carry it. The quantized
-// spectrum is never altered, so the decoded audio is bit-identical to the input:
-// this is the MP3 equivalent of recompressing a ZIP archive at a higher setting.
+// spectrum, the scalefactors and every gain and window field are never altered,
+// so the output means exactly the audio the input did: this is the MP3
+// equivalent of recompressing a ZIP archive at a higher setting. Decoders render
+// it identically too, bar one — see the README on macOS CoreAudio.
 //
 // The entry points are [Process] for in-memory data and [ProcessFile].
 package mp3packer
@@ -40,6 +42,26 @@ type Options struct {
 	// one per CPU. Ignored unless Recompress is set.
 	Workers int
 
+	// MinBitrate is a floor on every frame's size, in kbps, read the way
+	// mp3packer's -b switch reads it: see [mp3.Header.CapacityFloor]. Naming an
+	// exact bitrate makes the output constant-bitrate at that rate, since after
+	// recompression no frame wants more than the floor gives it. Zero, the
+	// default, lets every frame be as small as its data allows.
+	//
+	// The audio is unaffected either way. A floor only adds padding, so it costs
+	// size and buys a stream a player that cannot handle VBR will accept.
+	MinBitrate int
+
+	// ConstantBitrate lays the output out at the lowest constant bitrate the
+	// recompressed audio fits in, which is MinBitrate with the number worked out
+	// rather than given. It is decided from the payloads this same repack
+	// produced, so it costs nothing beyond the search that was going to run
+	// anyway — no need to ask [SmallestCBRBitrate] first and then repack.
+	//
+	// MinBitrate still applies as a floor, so setting both gives the lower bound
+	// you asked for or the lowest that fits, whichever is larger.
+	ConstantBitrate bool
+
 	// Log, if set, receives progress and per-frame diagnostics.
 	Log func(format string, args ...any)
 }
@@ -68,6 +90,11 @@ type Stats struct {
 	SyncErrors   int
 	PayloadBits  int // total part2_3_length in the input
 	NewPayload   int // total part2_3_length in the output
+
+	// Bitrate is the floor the frame layout worked to, in kbps, or zero if it was
+	// free to make every frame as small as it could. With Options.ConstantBitrate
+	// this is the bitrate that was chosen, and the output is that bitrate.
+	Bitrate int
 
 	// Wall time of each stage, zero unless built with -tags mp3timing. Only
 	// Recompress uses more than one goroutine, so Prepare and Layout together
@@ -198,20 +225,57 @@ func Process(data []byte, opt Options) ([]byte, Stats, error) {
 		stats.NewPayload += work[i].newBits
 	}
 
+	firstNum := 0
+	if tag != nil {
+		firstNum = 1 // the header frame takes the stream's first place in the padding cycle
+	}
+	if opt.ConstantBitrate {
+		// Asked of the payloads this repack just produced, so the answer is the
+		// real one rather than a bound taken from the input.
+		payloads := make([]int, len(work))
+		for i := range work {
+			payloads[i] = len(work[i].data)
+		}
+		h := audio[0].Header
+		bitrate := h.SmallestCBRBitrate(payloads, firstNum)
+		if bitrate == 0 {
+			return nil, stats, ErrNoConstantBitrate
+		}
+		if tag != nil && first.Header.Bitrate() > bitrate {
+			// The header frame is preserved rather than rebuilt, so it can be
+			// grown to the floor but not shrunk to it (its Xing payload and any
+			// LAME extension have to stay where they are). A stream whose first
+			// frame is larger than the rest is not constant bitrate, so the floor
+			// rises to meet it instead.
+			bitrate = first.Header.Bitrate()
+			opt.logf("constant bitrate raised to the %s header frame's own %d kbps", tag.Kind, bitrate)
+		}
+		if h.CapacityFloor(bitrate).At(0).DataSize > h.CapacityFloor(opt.MinBitrate).At(0).DataSize {
+			opt.MinBitrate = bitrate
+		}
+		opt.logf("constant bitrate: %d kbps", opt.MinBitrate)
+	}
+	stats.Bitrate = audio[0].Header.CapacityFloor(opt.MinBitrate).Bitrate()
+
 	out := make([]byte, 0, len(data))
 	out = append(out, file.StartJunk...)
 	streamStart := len(out)
+	headerFrame := firstRaw
 	if tag != nil {
-		out = append(out, firstRaw...)
+		// A stream is only constant-bitrate if this frame is that bitrate too, so
+		// the floor applies here as much as to the audio — but nothing inside the
+		// frame moves, so growing it is a new header and a longer tail.
+		headerFrame = growToFloor(firstRaw, *first, opt)
+		out = append(out, headerFrame...)
 	}
 	framePos := make([]int, 0, len(audio))
-	out, err = layout(out, audio, work, streamStart, &framePos, opt)
+	out, err = layout(out, audio, work, streamStart, firstNum, &framePos, opt)
 	if err != nil {
 		return nil, stats, err
 	}
 	streamBytes := len(out) - streamStart
 	if tag != nil {
-		tag.Repair(out[streamStart:streamStart+len(firstRaw)], streamBytes, framePos)
+		tag.Repair(out[streamStart:streamStart+len(headerFrame)], streamBytes, framePos)
 	}
 	out = append(out, file.EndJunk...)
 
@@ -434,13 +498,49 @@ func applyConfig(g *mp3.GranuleInfo, cfg huffman.Config) {
 	}
 }
 
+// growToFloor pads a leading header frame up to opt.MinBitrate's floor, so that
+// a constant-bitrate output is constant across its first frame too. It returns
+// raw unchanged when the frame already reaches the floor, which includes every
+// repack that sets no floor at all.
+//
+// The frame carries no audio, so there is nothing to move: the Xing or VBRI
+// payload keeps its offsets and the new room is zeros at the end. Only the
+// header changes, and the frame CRC with it if the frame has one.
+func growToFloor(raw []byte, fr mp3.Frame, opt Options) []byte {
+	h := fr.Header
+	floor := h.CapacityFloor(opt.MinBitrate).At(0)
+	size := floor.DataSize + h.FrameSize() - h.DataSize()
+	if size <= len(raw) {
+		return raw
+	}
+	h.BitrateIndex = floor.Index
+	h.Padding = floor.Padding
+	header := h.Bytes()
+
+	out := make([]byte, 0, size)
+	out = append(out, header[:]...)
+	rest := raw[4:]
+	if h.CRC {
+		crc := mp3.FrameCRC(header, rest[2:2+h.SideInfoSize()])
+		out = append(out, byte(crc>>8), byte(crc))
+		rest = rest[2:]
+	}
+	out = append(out, rest...)
+	return appendZeros(out, size-len(out))
+}
+
 // layout chooses a frame size for every frame and writes the stream.
 //
 // Each frame gets the smallest size that can hold what is left of its own audio
 // after the bit reservoir contributes, while still leaving room for any later
 // frame that is too large to fit in a single frame of its own. Since only whole
-// frame sizes exist, this minimises the file.
-func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, framePos *[]int, opt Options) ([]byte, error) {
+// frame sizes exist, this minimises the file — unless opt.MinBitrate raises the
+// floor, in which case a frame given more room than it needs banks the rest in
+// the reservoir, and once even that is full the remainder is padding.
+//
+// firstNum is the position of frames[0] in the output stream, which is 1 when a
+// header frame precedes it. Only the constant-bitrate padding cycle cares.
+func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart, firstNum int, framePos *[]int, opt Options) ([]byte, error) {
 	n := len(frames)
 
 	// How many bytes of reservoir each frame needs to have banked before it,
@@ -488,12 +588,26 @@ func layout(out []byte, frames []mp3.Frame, work []frameWork, streamStart int, f
 		}
 		want := len(work[i].data) + need[i+1] - avail
 		chosen[i] = smallestCapacity(h, want)
+		if opt.MinBitrate > 0 {
+			// Guarded rather than folded into the comparison: this is the serial
+			// path, and a repack with no floor should not pay for the option.
+			if floor := h.CapacityFloor(opt.MinBitrate).At(firstNum + i); floor.DataSize > chosen[i].DataSize {
+				chosen[i] = floor
+			}
+		}
 		mdb[i] = avail
 		stream.addData(work[i].data)
 		capacity += chosen[i].DataSize
 	}
 	if gaps > 0 {
-		opt.logf("%d bytes could not be packed into the reservoir", gaps)
+		if opt.MinBitrate > 0 {
+			// Expected rather than notable: a floor hands out more room than the
+			// audio needs, and once the reservoir is as full as a back-reference
+			// can reach, the rest of the slack has nowhere to go but padding.
+			opt.logf("%d bytes of padding, the reservoir being full", gaps)
+		} else {
+			opt.logf("%d bytes could not be packed into the reservoir", gaps)
+		}
 	}
 
 	cursor := 0

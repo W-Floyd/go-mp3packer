@@ -6,9 +6,12 @@ An MP3 stores its spectrum with Huffman code tables chosen from a fixed set, and
 encoders pick those tables heuristically. `go-mp3packer` re-codes every granule
 with the cheapest tables the format allows, then re-lays the result out across
 frames so that as little padding as possible is left over. Nothing is
-re-quantized and nothing is re-encoded in the lossy sense, so the decoded audio
-is bit-for-bit identical to the input — the same relationship a recompressed ZIP
-archive has to the original.
+re-quantized and nothing is re-encoded in the lossy sense: every quantized
+coefficient, every scalefactor and every gain and window field comes out the
+other side bit for bit, so the file still means the same audio — the same
+relationship a recompressed ZIP archive has to the original. What a *decoder*
+then makes of it is bit-identical too for every decoder tested here bar one; see
+[Losslessness, and one decoder that disagrees](#losslessness-and-one-decoder-that-disagrees).
 
 This is a from-scratch Go implementation of the recompression half of Reed
 Wilson's [mp3packer](https://github.com/hmage/mp3packer), scoped like the C++
@@ -32,6 +35,9 @@ mp3packer in.mp3           # repack in place
 ```
   -n         skip the Huffman search; only repack the frame layout
   -no-crc    drop the optional frame CRC, freeing 2 bytes per frame
+  -cbr       constant-bitrate output at the lowest bitrate that fits
+  -b N       minimum bitrate in kbps; an exact one gives constant-bitrate output
+  --ib       print the lowest constant bitrate this file fits in, and exit
   -j N       recompression workers (0 = one per CPU)
   -f         overwrite the output file if it exists
   -v         log per-frame details
@@ -40,6 +46,40 @@ mp3packer in.mp3           # repack in place
 
 Output is written to a temporary file and renamed into place, so an interrupted
 run cannot truncate your music, and in-place repacking is safe.
+
+### Constant bitrate
+
+Repacking normally makes every frame as small as its own audio needs, which is
+variable bitrate by construction. `-cbr` gives up that saving for a stream a
+player that cannot follow a varying bitrate will accept:
+
+```sh
+mp3packer -cbr in.mp3 out.mp3   # lowest constant bitrate this audio fits in
+mp3packer --ib in.mp3           # just print that bitrate: 192
+mp3packer -b 192 in.mp3 out.mp3 # or name one, as a floor
+```
+
+The bitrate `-cbr` picks is the lowest one every frame fits in *after* the search
+has shrunk it, worked out from that same repack rather than from a first pass, so
+it costs nothing beyond the repack itself. It is a real search, not the average
+bitrate: a constant bitrate has to carry each frame's own payload out of one
+frame's room plus whatever earlier frames banked in the bit reservoir, and only
+the 511 bytes a back-reference can reach are ever available. `--ib` answers the
+same question without writing anything; the answer moves with `-n` and `-no-crc`,
+since both change how much has to fit.
+
+`-b N` sets a floor instead of finding one, reading `N` the way the original
+mp3packer's `-b` does — an exact bitrate gives that bitrate, one more than an
+exact bitrate gives every frame padded, anything else rounds up. Combined with
+`-cbr` the higher of the two wins. Padding follows the standard's cycle, so a
+44.1 kHz stream is padded on the same frames a CBR encoder would pad, and the
+file is exactly the bitrate it claims.
+
+Frames only ever grow, and only into padding: the audio is untouched, and the
+leading Xing/Info frame is grown to match so the whole file is one bitrate. That
+frame is preserved rather than rebuilt, so if it arrived *larger* than the audio
+needs, the floor rises to its bitrate rather than leaving one odd frame at the
+front.
 
 ## As a library
 
@@ -51,8 +91,23 @@ stats, err := mp3packer.ProcessFile("in.mp3", "out.mp3", mp3packer.Options{
 })
 ```
 
-`Process` does the same thing for data already in memory. The lower layers are
-exported and usable on their own:
+`Process` does the same thing for data already in memory. Everything the command
+does is an option, including constant bitrate:
+
+```go
+// The lowest constant bitrate this audio fits in, chosen from the repack itself.
+out, stats, err := mp3packer.Process(data, mp3packer.Options{
+    Recompress:      true,
+    ConstantBitrate: true,
+})
+// stats.Bitrate is the bitrate it settled on. MinBitrate names one instead, and
+// raises the floor if it is higher than ConstantBitrate would have picked.
+
+// Or ask first, without writing anything — same answer, same search.
+kbps, err := mp3packer.SmallestCBRBitrate(data, mp3packer.Options{Recompress: true})
+```
+
+The lower layers are exported and usable on their own:
 
 - `mp3` — frame headers, side information, CRC, Xing/Info tags, and a parser that
   hands back every frame of a file with its main data.
@@ -236,13 +291,56 @@ crashers under `testdata/fuzz/` are regression seeds that run with the ordinary
 suite. `go test -fuzz FuzzProcess` to go looking for more; [CLAUDE.md](CLAUDE.md)
 has what it caught and what it taught.
 
+### Losslessness, and one decoder that disagrees
+
+What is preserved exactly is everything the standard makes the audio a function
+of: all 576 quantized coefficients of every granule, the scalefactors bit for
+bit, and global_gain, scalefac_compress, scalefac_scale, preflag, block_type,
+mixed_block_flag, subblock_gain and scfsi. What the search *does* change is how
+those same values are split between the big-values and count1 regions, how far
+the coded region runs before the implicit zero tail, and which tables code it —
+none of which a decoder is supposed to be able to tell apart.
+
+macOS `afconvert` (CoreAudio) can tell them apart, by one unit in the last place
+of a 16-bit sample. Decoding a repack and the input it came from and comparing
+sample by sample:
+
+| decoder | differing samples |
+|---|---|
+| `ffmpeg` (mp3float) | 0 |
+| `mpg123` | 0 |
+| `afconvert -d LEI16` | 35 of 21,977,578 |
+
+Those 35 are on a 2 MB, 9539-frame narration file; the rate is about 1.6 samples
+per million, every difference is exactly ±1 at 16-bit scale, in both directions,
+and the deviation sits around −90 dBFS. It is not particular to that file — the
+long track already used for benchmarking here does it too, 3 samples of 14
+million — and it is the boundary move itself rather than any particular coding
+choice: constraining the search to keep each granule's `big_values` and coded
+extent makes `afconvert` agree exactly, and costs almost all of the saving (0.45%
+→ 0.04% on that file), which is why it is not offered as a mode. The likeliest
+mechanism is that CoreAudio requantizes a ±1 coefficient down a slightly
+different path depending on which region coded it, the two paths agreeing only to
+within one float rounding step. The standard asks for limited-accuracy RMS
+conformance rather than bit-exactness, so a decoder is entitled to this.
+
+So: the bitstream means the same audio, and every decoder tested renders it
+identically except CoreAudio, which renders it inaudibly differently.
+
 ## Not implemented
 
-The original mp3packer does more than recompress. Out of scope here: CBR/VBR
-conversion and minimum-bitrate control (`-b`), the reservoir placement switches
-(`-r`, `-R`), tag stripping (`-s`, `-t`), directory processing, the `-i`
-information report, and error concealment for damaged frames — broken frames are
-copied through as they are rather than silenced.
+The original mp3packer does more than recompress. Out of scope here: the reservoir
+placement switches (`-r`, `-R`), tag stripping (`-s`, `-t`), directory processing,
+the rest of the `-i` information report, and error concealment for damaged frames
+— broken frames are copied through as they are rather than silenced.
+
+`-r`/`-R` is the nearest of those to mattering. mp3packer offers a choice of where
+the slack sits: maximize the reservoir, so a frame's data starts as early as it
+can, or minimize it, so each frame is as close to self-contained as the layout
+allows. Neither changes the size of the file — the original's docs say so plainly —
+and the only use given for minimizing is making CBR320 easier to split. We do what
+`-R` does, which is also what mp3packer did before 1.16, and with a floor in play
+that means `main_data_begin` sits pinned at its 511-byte maximum.
 
 ## Licence
 
