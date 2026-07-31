@@ -193,6 +193,7 @@ func TestTreesGenerated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	got = bytes.ReplaceAll(got, []byte{'\r', '\n'}, []byte{'\n'})
 	if !bytes.Equal(got, want) {
 		t.Errorf("%s is not what the grids produce; re-run with -update-trees", path)
 	}
