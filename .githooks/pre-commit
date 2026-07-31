@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "Pre-commit: gofmt"
+if [ -n "$(gofmt -l .)" ]; then
+	echo "FAIL: gofmt found unformatted Go files"
+	gofmt -l .
+	exit 1
+fi
+
+echo "Pre-commit: go vet"
+go vet ./...
+
+echo "Pre-commit: go test"
+go test ./...
+
+echo "Pre-commit: OK"
