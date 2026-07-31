@@ -53,7 +53,7 @@ TEXT ·accumulate(SB), NOSPLIT, $0-32
 	MOVQ keys_base+8(FP), SI
 	MOVQ keys_len+16(FP), CX
 	TESTQ CX, CX
-	JZ    done
+	JZ   done
 
 	LEAQ ·pairCostTable(SB), R8
 	LEAQ ·escapeCostTable(SB), R9
@@ -300,7 +300,8 @@ keybestavx2:
 	VPSHUFD $0x4E, X0, X1
 	VPMINUD X1, X0, X0
 
-	VMOVD X0, ret+16(FP)
+	MOVD X0, AX
+	MOVL AX, ret+16(FP)
 	VZEROUPPER
 	RET
 
@@ -357,7 +358,7 @@ TEXT ·bestTails(SB), NOSPLIT, $0-56
 	MOVQ out_base+32(FP), DI
 	MOVQ out_len+40(FP), CX
 	TESTQ CX, CX
-	JZ    tailsdone
+	JZ   tailsdone
 
 	LEAQ ·laneIndex(SB), BX
 
@@ -515,8 +516,9 @@ tailsavx2one:
 	VPSHUFD $0x4E, X4, X5
 	VPMINUD X5, X4, X4
 
-	VMOVD X4, (DI)
-	ADDQ  $4, DI
+	MOVD X4, AX
+	MOVL AX, (DI)
+	ADDQ   $4, DI
 	DECQ  CX
 	JNZ   tailsavx2one
 
