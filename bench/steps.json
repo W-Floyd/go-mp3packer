@@ -68,7 +68,7 @@
   ],
   "steps": [
     {
-      "commit": "dccd9a1",
+      "commit": "f2711e3",
       "label": "first working version",
       "tables": [
         "steps-short",
@@ -77,7 +77,7 @@
       ]
     },
     {
-      "commit": "6a819dd",
+      "commit": "4346af3",
       "label": "NEON / SSE2 kernels",
       "tables": [
         "steps-short",
@@ -86,7 +86,7 @@
       ]
     },
     {
-      "commit": "72f5d80",
+      "commit": "effd1a1",
       "label": "tail costs batched, decode by table lookup",
       "tables": [
         "steps-short",
@@ -95,7 +95,7 @@
       ]
     },
     {
-      "commit": "e0b4a62",
+      "commit": "d119d38",
       "label": "region search reduced to arithmetic",
       "tables": [
         "steps-short",
@@ -104,7 +104,7 @@
       ]
     },
     {
-      "commit": "77769a9",
+      "commit": "1e590cb",
       "label": "count1 quadruples and pair signs branchless",
       "tables": [
         "steps-short",
@@ -113,7 +113,7 @@
       ]
     },
     {
-      "commit": "6e01f96",
+      "commit": "5a2d57e",
       "label": "preallocation, encoder invariants hoisted",
       "tables": [
         "steps-short",
@@ -122,7 +122,7 @@
       ]
     },
     {
-      "commit": "30781f4",
+      "commit": "ad650f8",
       "label": "AVX2 path for the cost kernels",
       "tables": [
         "steps-short",
@@ -131,7 +131,7 @@
       ]
     },
     {
-      "commit": "990c36a",
+      "commit": "5c3f5de",
       "label": "bit window's tail read from a pad",
       "tables": [
         "steps-short",
@@ -140,7 +140,7 @@
       ]
     },
     {
-      "commit": "49485f4",
+      "commit": "9e4d6fc",
       "label": "AVX2 tail reduction batched four rows",
       "tables": [
         "steps-short",
@@ -149,7 +149,7 @@
       ]
     },
     {
-      "commit": "d42371d",
+      "commit": "7bac97a",
       "label": "coder's state kept out of memory",
       "tables": [
         "steps-short",
@@ -158,7 +158,7 @@
       ]
     },
     {
-      "commit": "b723919",
+      "commit": "ab3cf7b",
       "label": "memoised region costs not called per candidate",
       "tables": [
         "steps-short",
@@ -167,7 +167,7 @@
       ]
     },
     {
-      "commit": "cc1dd58",
+      "commit": "fef1fb2",
       "label": "prefix covers batched",
       "tables": [
         "steps-short",
@@ -176,7 +176,7 @@
       ]
     },
     {
-      "commit": "5f8421c",
+      "commit": "286ae2e",
       "label": "before the frame CRC was folded",
       "tables": [
         "steps-short",
@@ -185,7 +185,7 @@
       ]
     },
     {
-      "commit": "f987874",
+      "commit": "d019022",
       "label": "frame CRC folded a byte at a time",
       "tables": [
         "steps-short",
@@ -194,7 +194,7 @@
       ]
     },
     {
-      "commit": "30323e5",
+      "commit": "204a3cb",
       "label": "window-switched geometry in its own loop",
       "tables": [
         "steps-short",
@@ -203,7 +203,7 @@
       ]
     },
     {
-      "commit": "3ecdf7d",
+      "commit": "0db109f",
       "label": "encoder's accumulator held in registers",
       "tables": [
         "steps-short",
@@ -212,7 +212,7 @@
       ]
     },
     {
-      "commit": "3be0ea7",
+      "commit": "a0cce03",
       "label": "reservoir described rather than built",
       "tables": [
         "steps-short",
@@ -221,7 +221,7 @@
       ]
     },
     {
-      "commit": "b15d4c7",
+      "commit": "72bfbf6",
       "label": "side info written into the frame",
       "tables": [
         "steps-short",
@@ -230,7 +230,7 @@
       ]
     },
     {
-      "commit": "212628e",
+      "commit": "e4c06f6",
       "label": "frame CRC folded four bytes at a time",
       "tables": [
         "steps-short",
@@ -239,7 +239,7 @@
       ]
     },
     {
-      "commit": "f49523a",
+      "commit": "4166130",
       "label": "frame data read from the reservoir in place",
       "tables": [
         "steps-short",
@@ -248,7 +248,7 @@
       ]
     },
     {
-      "commit": "8050540",
+      "commit": "3b630e4",
       "label": "last non-zero coefficient carried into the encoder",
       "tables": [
         "steps-short",
@@ -257,7 +257,7 @@
       ]
     },
     {
-      "commit": "cb9bab4",
+      "commit": "30a4995",
       "label": "cost tables scaled once, not per prefix row",
       "tables": [
         "steps-short",
@@ -266,7 +266,7 @@
       ]
     },
     {
-      "commit": "acb37e3",
+      "commit": "624a082",
       "label": "big-value pair resolved in one ten-bit probe",
       "tables": [
         "steps-short",
@@ -275,7 +275,7 @@
       ]
     },
     {
-      "commit": "c56ce1b",
+      "commit": "8a31759",
       "label": "constant-bitrate floor, unused by default",
       "tables": [
         "steps-short",

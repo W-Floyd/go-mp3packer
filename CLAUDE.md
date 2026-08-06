@@ -122,7 +122,7 @@ pooling it later would be meaningless. The committed side's runs are kept.
 **After committing**, name both:
 
 ```sh
-go run ./tools/benchsteps ab b15d4c7 212628e
+go run ./tools/benchsteps ab 72bfbf6 e4c06f6
 ```
 
 It builds both, alternates which runs first, measures until each median's
@@ -184,7 +184,7 @@ cannot resolve say so and cite the `ab` that produced them.
 - **Don't trust profile deltas between runs.** `Writer.put` read 4.6% and 8.9% on
   identical code. Use interleaved A/B wall-clock; profiles for *where*, not *how
   much*. Noise: `BenchmarkOptimizeGranule*` ±1–3%, `BenchmarkLayoutOnly` ±2%
-  since `9754913`, end-to-end ±1–5%. Use `-count 10` and `benchstat` with
+  since `41f89d6`, end-to-end ±1–5%. Use `-count 10` and `benchstat` with
   p-values; `~` is a real answer.
 - **Three interleaved pairs is not enough for an all-core number.** The encoder
   change read 1.9% by median and 3.5% by mean off the same three pairs; eight
