@@ -33,6 +33,32 @@ wrong without it:
   `DECQ` wrapped to 2⁶⁴−1 and walked off the heap. Assembles clean, passes vet,
   impossible on arm64. `TestKernelsDispatchPaths` is what catches it.
 
+### Validation scripts — coverage the corpus cannot hold
+
+`make validate` runs the three scripts in `scripts/`, which drive the built CLI
+against corpora synthesised on the spot with ffmpeg and lame. They exist because
+the suite's losslessness check compares decoded *spectra* with our own decoder,
+over seven committed files: that proves the coefficients survive, not that a real
+decoder makes the same samples of them, and it cannot reach a sample rate or
+channel mode no committed file uses.
+
+- `test_matrix.sh` — a fixed grid (three signal types × 44100/22050/11025 ×
+  mono/stereo × CBR/VBR × CRC on/off, 72 cases) through `-n`, one worker, every
+  core and `-no-crc`, each decoded and compared against the source.
+- `test_regression.sh` — narrower and deeper: all nine MPEG-1/2/2.5 sample
+  rates, three *different* decoders (ffmpeg, lame, mpg123) so that a Xing/LAME
+  tag fault which only moves ffmpeg's gapless trim cannot hide, decoded length
+  as well as sample equality, near-silence, idempotence, `mp3val` if installed,
+  and `bards-tale.mp3` when it is present.
+- `test_random.sh N seed` — draws from the whole parameter space instead of a
+  grid; the seed is printed and reproduces the run.
+
+PCM is compared with `cmp`, not a tolerance: a lossless repack decodes to the
+same bytes, and that is both the stronger check and the one needing no python.
+A green run means nothing unless the harness can fail, so these were checked
+against a stub that truncates the file — length, cross-decoder and idempotence
+each report it, and the exit status is 1.
+
 ### Fuzzing
 
 `FuzzProcess` covers the three option combinations, seeded from `testdata/`.
