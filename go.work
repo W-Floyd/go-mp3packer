@@ -1,0 +1,14 @@
+// The workspace ties the library to the tools module beside it, so that `go
+// build ./...`, `go vet ./...` and `go test ./...` from the repository root still
+// reach every package in the repository, and an edit to the library is seen by
+// the tools without a version to bump.
+//
+// It is committed deliberately. Nothing consuming this repository as a dependency
+// reads it — a workspace applies to the tree you are working in, not to a module
+// someone downloads — so it costs a consumer nothing.
+go 1.26.5
+
+use (
+	.
+	./tools
+)

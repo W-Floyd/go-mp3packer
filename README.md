@@ -107,6 +107,11 @@ out, stats, err := mp3packer.Process(data, mp3packer.Options{
 kbps, err := mp3packer.SmallestCBRBitrate(data, mp3packer.Options{Recompress: true})
 ```
 
+It depends on nothing. The module's `go.mod` requires no package outside the
+standard library, so importing it adds no line to your go.sum — the tools that
+generate the tables in this file need a markdown renderer, and live in a separate
+module for that reason.
+
 The lower layers are exported and usable on their own:
 
 - `mp3` — frame headers, side information, CRC, Xing/Info tags, and a parser that
@@ -157,73 +162,76 @@ disagree about what to keep:
   stream size, seek table and checksum. The C++ port truncates it to the smallest
   frame that fits, which is up to one frame smaller but discards trailing
   extension fields.
-- **MPEG-2 and 2.5.** We recompress low-sampling-frequency files too, which needs
-  the LSF scalefactor tables to find where each granule's Huffman data starts;
-  the C++ port copies those frames through untouched.
 
-On speed, every test file, all three invoked as commands with every core
-available, on an Apple M4 Max. `reference` is
-[mp3packercpp](https://github.com/Snesnopic/mp3packercpp) as released; `fork` is
-[a branch of it](https://github.com/W-Floyd/mp3packercpp/tree/perf/huffman-region-search)
-carrying optimisation work that upstream does not have, which is the more
-demanding comparison of the two:
+MPEG-2 and 2.5 used to be a third difference — we recompressed low-sampling-frequency
+files and the C++ port copied those frames through untouched. It sizes LSF
+scalefactors per ISO 13818-3 Annex B as of its 1.2.0, and now comes out to the same
+byte as we do on `lsf-22050.mp3`.
+
+On speed, every test file, both invoked as commands with every core available, on
+an Apple M4 Max. `reference` is
+[mp3packercpp](https://github.com/Snesnopic/mp3packercpp) as released, which now
+carries the optimisation work that
+[a fork of it](https://github.com/W-Floyd/mp3packercpp/tree/perf/huffman-region-search)
+was previously measured separately here — upstream has merged it, so there is one
+C++ side again and it is the demanding one:
 
 <!-- comparison:comparison-files -->
-| file              |    size |    ours |    fork | reference | vs fork | vs ref |
-|:------------------|--------:|--------:|--------:|----------:|--------:|-------:|
-| bench-vbr.mp3     |  180 kB | 4.52 ms | 3.98 ms |   22.7 ms |    0.9× |   5.0× |
-| cbr-crc.mp3       |   20 kB | 3.75 ms | 2.89 ms |   7.14 ms |    0.8× |   1.9× |
-| cbr320-quiet.mp3  |  322 kB | 4.17 ms | 3.76 ms |   8.41 ms |    0.9× |   2.0× |
-| cbr320-stereo.mp3 |   50 kB | 3.52 ms | 2.97 ms |   3.51 ms |    0.8× |   1.0× |
-| lsf-22050.mp3     |   15 kB | 3.50 ms | 2.36 ms |   2.64 ms |    0.7× |   0.8× |
-| vbr-joint.mp3     |   28 kB | 3.67 ms | 3.20 ms |   6.73 ms |    0.9× |   1.8× |
-| vbr-mono.mp3      |   10 kB | 3.35 ms | 2.66 ms |   4.51 ms |    0.8× |   1.3× |
-| bards-tale.mp3    | 3810 kB | 23.2 ms | 22.4 ms |    206 ms |    1.0× |   8.9× |
+| file              |    size |    ours | reference | vs ref |
+|:------------------|--------:|--------:|----------:|-------:|
+| bench-vbr.mp3     |  180 kB | 5.61 ms |   4.97 ms |   0.9× |
+| cbr-crc.mp3       |   20 kB | 4.13 ms |   3.31 ms |   0.8× |
+| cbr320-quiet.mp3  |  322 kB | 4.96 ms |   4.35 ms |   0.9× |
+| cbr320-stereo.mp3 |   50 kB | 4.04 ms |   3.36 ms |   0.8× |
+| lsf-22050.mp3     |   15 kB | 4.13 ms |   3.67 ms |   0.9× |
+| vbr-joint.mp3     |   28 kB | 4.22 ms |   3.42 ms |   0.8× |
+| vbr-mono.mp3      |   10 kB | 3.84 ms |   3.06 ms |   0.8× |
+| bards-tale.mp3    | 3810 kB | 26.8 ms |   28.9 ms |   1.1× |
 <!-- /comparison:comparison-files -->
 
-Three things in there are worth reading rather than skipping. The lead over the
-released reference collapses as the files get smaller, and on the smallest it goes
-the other way: on a small enough file every side is mostly paying to start a
-process, and starting ours costs the larger share of that. `lsf-22050.mp3` is
-quicker for both of them for a different reason — the C++ port declines to
-recompress MPEG-2 at all, so it is not doing the same job.
-
-The fork is the one to watch. It is within noise of us on long material and ahead
-on the short files, for the startup reason above rather than anything about the
-repack. Against a C++ implementation carrying comparable optimisation work, level
-is the honest description; the order-of-magnitude figures belong to the comparison
-with upstream, not to the language.
+Only the last row is about the repack. Everything above it is a file small enough
+that both sides spend most of their wall clock starting a process, and starting
+ours costs the larger share of that — about a millisecond, which is the whole of
+the gap on every short row and is why they all sit at 0.7–0.9× regardless of what
+is in the file.
 
 Across worker counts, on the longest file to hand:
 
 <!-- comparison:comparison-threads -->
-| threads |    ours |    fork | reference | vs fork | vs ref |
-|--------:|--------:|--------:|----------:|--------:|-------:|
-|       1 |  173 ms |  177 ms |   2251 ms |    1.0× |  13.0× |
-|       2 | 92.1 ms | 96.1 ms |   1153 ms |    1.0× |  12.5× |
-|       4 | 51.7 ms | 54.3 ms |    597 ms |    1.1× |  11.6× |
-|     all | 23.2 ms | 22.4 ms |    206 ms |    1.0× |   8.9× |
+| threads |    ours | reference | vs ref |
+|--------:|--------:|----------:|-------:|
+|       1 |  190 ms |    194 ms |   1.0× |
+|       2 |  100 ms |    105 ms |   1.0× |
+|       4 | 54.4 ms |   58.5 ms |   1.1× |
+|     all | 26.8 ms |   28.9 ms |   1.1× |
 <!-- /comparison:comparison-threads -->
 
-Our lead over the reference is largest on one worker and narrows as cores are
-added, because it scales better than we do. A fixed part of our wall clock is
-parsing and laying frames back out, and no number of workers can share it — see
-[PERFORMANCE.md](PERFORMANCE.md). The fork tracks us closely at every worker
-count, which is what two implementations doing the same work in the same shape
-look like.
+Against a C++ implementation carrying the same optimisation work, level is the
+honest description. We are ahead on long material at every worker count, but by
+2% on one worker and 8% on all of them, off five runs a cell on a machine that
+drifts further than that between sittings — enough to say the two are in the same
+place, not enough to make a claim of. That is what two implementations doing the
+same work in the same shape look like; the order-of-magnitude figures this section
+used to quote were against a C++ side that no longer exists.
 
-`TestComparison` produces both tables and asserts what they claim, which is
-narrowly that we are faster than the reference on the longest file at every worker
-count. Nothing is asserted about the fork: which way that one goes is a fact to
-report, not a property of this repository to defend. It times every side the same
-way, as a subprocess over a file, so the exec and the disk are in every figure:
+Neither side escapes the serial floor. A fixed part of the wall clock is parsing
+and laying frames back out, and no number of workers can share it: across sixteen
+cores we scale 7.1× and the reference 6.7×, both far short of the core count. See
+[PERFORMANCE.md](PERFORMANCE.md) for where that time goes.
+
+Both tables are generated rather than transcribed, by a command rather than a
+test — nothing here is asserted, and a generator behind a test flag was only ever
+a generator. It times both sides the same way, as a subprocess over a file, so the
+exec and the disk are in every figure:
 
 ```sh
 export MP3PACKER_REFERENCE=/path/to/mp3packercpp
-export MP3PACKER_REFERENCE_FORK=/path/to/a/fork   # optional third column
 export MP3PACKER_BENCH_FILE=/path/to/some/minutes/of/music.mp3   # optional
-go test -run TestComparison -update-readme .
+go run ./tools/readmetables
 ```
+
+`go run ./tools/readmetables -savings` rewrites the savings table alone, which is
+exact and needs no second implementation; `-dry-run` prints instead of writing.
 
 `TestReferenceCompression` is the other half: it repacks each file with both and
 fails if our coded audio is larger. On most of the corpus the output is the same

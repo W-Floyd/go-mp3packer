@@ -75,7 +75,7 @@ an error.
 
 ```sh
 export MP3PACKER_BENCH_FILE=$PWD/bards-tale.mp3
-go run ./cmd/benchsteps ab -input serial HEAD WORK
+go run ./tools/benchsteps ab -input serial HEAD WORK
 ```
 
 `WORK` is the working tree as it stands — modifications, new files and deletions
@@ -96,7 +96,7 @@ pooling it later would be meaningless. The committed side's runs are kept.
 **After committing**, name both:
 
 ```sh
-go run ./cmd/benchsteps ab b15d4c7 212628e
+go run ./tools/benchsteps ab b15d4c7 212628e
 ```
 
 It builds both, alternates which runs first, measures until each median's
@@ -130,9 +130,9 @@ machine, not twenty simultaneous regressions. `run` warns when it sees one, and
 the remedy keeps the rest of the session:
 
 ```sh
-go run ./cmd/benchsteps prune -contaminated 1.05 -dry-run   # what would go
-go run ./cmd/benchsteps prune -contaminated 1.05            # drop those passes
-go run ./cmd/benchsteps prune -session 3                    # or the whole sitting
+go run ./tools/benchsteps prune -contaminated 1.05 -dry-run   # what would go
+go run ./tools/benchsteps prune -contaminated 1.05            # drop those passes
+go run ./tools/benchsteps prune -session 3                    # or the whole sitting
 ```
 
 **What the tables are not.** They are the shape of twenty steps at once. A step
@@ -179,16 +179,41 @@ cannot resolve say so and cite the `ab` that produced them.
   — 1.36 ms against 4.76, of which 2.88 is starting the process. Pairing `Process`
   against `BenchmarkReference` overstated the lead by about 3×. Use
   `BenchmarkCLI`, and prefer `MP3PACKER_BENCH_FILE` over the 8-second file, where
-  fixed costs dominate. `TestComparison` generates the README's tables and asserts
-  the claim; `-update-comparison` rewrites them. Two results from it to keep in
-  mind: **below about 50 kB we are level with or slower than the C++ port**,
-  because 2.9 ms of startup outweighs the work, and **our lead narrows as cores
-  are added** — 11.4× on one thread against 8.2× on sixteen, the reference scaling
-  11.2× where we manage 8.0×. Adding cores is not where the remaining win is; the
-  serial floor is.
+  fixed costs dominate. `go run ./tools/readmetables` generates the README's
+  tables and asserts nothing about the timings. **Upstream mp3packercpp has merged
+  the optimisation work that a fork of it used to carry** (its `5acbeac`, released
+  in 1.2.0), so the order-of-magnitude figures once quoted against the released
+  reference are gone and the two now run level: on `bards-tale.mp3` we are ahead by
+  2% on one worker and 8% on all sixteen, which five runs a cell on a machine that
+  drifts 7% between sittings cannot turn into a claim. Its 1.2.0 also
+  **recompresses MPEG-2 and 2.5**, which it used to pass through, so
+  `lsf-22050.mp3` now comes out the same byte on both sides and is no longer an
+  unequal comparison. Two results that still hold: **below about 50 kB we are
+  slower than the C++ port**, because ~1 ms more startup outweighs the work, and
+  **neither side escapes the serial floor** — across sixteen cores we scale 7.1×
+  and it 6.7×. Adding cores is not where the remaining win is; the serial floor is.
 
 ## Tooling
 
+- **Two modules, and the root one requires nothing.** Everything with a
+  dependency lives in `tools/` — `benchsteps`, `readmetables`, and the
+  `internal/mdtable` they share — under its own `go.mod`. This is not tidiness.
+  Go has no way to mark a requirement test-only, so a single import of
+  `tablewriter` anywhere in the root module puts it and its eleven transitive
+  dependencies into **every consumer's go.sum**, compiled or not: a scratch module
+  importing only `Process` picked up 24 checksum lines and fetched the zips to
+  produce them. Moving the import from a test to a `cmd/` would not have changed
+  that; only the module boundary does. Check it with a throwaway module and
+  `go mod tidy` before adding a dependency anywhere near the library.
+  - `go.work` ties the two together, and is committed — a workspace applies to
+    the tree you work in, never to a module someone downloads.
+  - **`./...` stops at the module boundary even inside a workspace.** `go test
+    ./...` from the root silently skips `tools/` entirely; CI and the pre-commit
+    hook name `./... ./tools/...`, and anything new that walks the repo must too.
+    This is how the split rots if it rots.
+  - `benchsteps` builds each commit's test binary with `GOWORK=off`, so a checkout
+    carrying `go.work` and one predating it produce the same binary and the cached
+    history stays comparable.
 - **`.env`** holds the local machine details — `MP3PACKER_X86_HOST` and
   `MP3PACKER_REFERENCE`. It is gitignored; `set -a; . ./.env; set +a` to load it.
   Nothing that identifies a machine belongs in a tracked file.
@@ -204,15 +229,14 @@ cannot resolve say so and cite the `ab` that produced them.
   at `$(go env GOPATH)/bin/benchstat`.
 - **Generated tables: never hand-edit one.** Every table in README.md and
   PERFORMANCE.md sits between HTML-comment markers and is written by code —
-  `TestComparison` and `TestSavings` with `-update-readme` for the README's,
-  `benchsteps inject` for PERFORMANCE.md's. `huffman/trees_gen.go` is generated
-  too — `go test ./huffman -run TestTreesGenerated -update-trees` derives it from
-  the code grids in `tables.go`, and the same test fails if the committed file has
-  drifted from them. All of them render through
-  `olekukonko/tablewriter`, which is why the columns line up. That dependency is
-  test-and-tool only: `go list -deps .` does not reach it, so nothing a consumer
-  of the library builds does either.
-- **`cmd/benchsteps` owns the step tables in PERFORMANCE.md**, and `ab` is how a single
+  `go run ./tools/readmetables` for the README's, `benchsteps inject` for
+  PERFORMANCE.md's. `huffman/trees_gen.go` is generated too — `go test ./huffman
+  -run TestTreesGenerated -update-trees` derives it from the code grids in
+  `tables.go`, and the same test fails if the committed file has drifted from
+  them. The tables all render through `tools/internal/mdtable`, which is why the
+  columns line up; the two generators used to carry a copy each and matched only
+  by coincidence.
+- **`tools/benchsteps` owns the step tables in PERFORMANCE.md**, and `ab` is how a single
   change is measured — see *How to A/B a change* above. Do not hand-edit the
   tables; add a commit to `bench/steps.json`, `run -sweep`, then `inject`. Runs are cached in
   `bench/results.json` and only unsettled cells are re-measured, so adding one

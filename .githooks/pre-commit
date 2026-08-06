@@ -11,10 +11,12 @@ if [ -n "$(gofmt -l .)" ]; then
 	exit 1
 fi
 
+# ./... stops at the module boundary even inside a workspace, so the tools module
+# has to be named separately or nothing in it is ever checked.
 echo "Pre-commit: go vet"
-go vet ./...
+go vet ./... ./tools/...
 
 echo "Pre-commit: go test"
-go test ./...
+go test ./... ./tools/...
 
 echo "Pre-commit: OK"

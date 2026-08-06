@@ -351,21 +351,3 @@ func BenchmarkRecompressWorkers(b *testing.B) {
 		})
 	}
 }
-
-// forkBinary returns a second implementation to compare against, taken from
-// $MP3PACKER_REFERENCE_FORK, or "" when it is unset. Unlike referenceBinary this
-// one is optional: it is a third column in the comparison tables, not the thing
-// the claim is made against, so its absence leaves the tables in their two-way
-// form rather than skipping the test.
-func forkBinary(tb testing.TB) string {
-	tb.Helper()
-	path := os.Getenv("MP3PACKER_REFERENCE_FORK")
-	if path == "" {
-		return ""
-	}
-	resolved, err := exec.LookPath(path)
-	if err != nil {
-		tb.Fatalf("MP3PACKER_REFERENCE_FORK=%q: %v", path, err)
-	}
-	return resolved
-}
